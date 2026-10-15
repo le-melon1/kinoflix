@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
+  <title>Netflix — Смотрите фильмы и сериалы онлайн</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+</head>
+<body class="netflix-body">
+
+  <!-- NETFLIX TOP NAVIGATION BAR -->
+  <header class="netflix-header" id="netflixHeader">
+    <div class="nav-left">
+      <div class="netflix-logo" onclick="goHome()">NETFLIX</div>
+      <nav class="nav-links">
+        <a class="nav-link active" onclick="switchCategory('all')">Главная</a>
+        <a class="nav-link" onclick="switchCategory('series')">Сериалы</a>
+        <a class="nav-link" onclick="switchCategory('movies')">Фильмы</a>
+        <a class="nav-link" onclick="switchCategory('trending')">Новинки и популярное</a>
+      </nav>
+    </div>
+
+    <div class="nav-right">
+      <!-- Netflix Expanding Search Bar -->
+      <div class="netflix-search-box" id="searchBox">
+        <button class="search-trigger-btn" onclick="toggleSearchInput()" title="Поиск фильмов и сериалов">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+        </button>
+        <input 
+          type="text" 
+          id="netflixSearchInput" 
+          placeholder="Фильмы, сериалы, ссылка с RuTracker..." 
+          autocomplete="off"
+          oninput="handleSearchInput(this.value)"
+        />
+        <button class="search-close-btn" id="searchClearBtn" onclick="clearSearch()" style="display: none;">✕</button>
+      </div>
+
+      <!-- RuTracker & VPN Status Pill -->
+      <div class="nav-pill" id="rutrackerStatusPill" onclick="openRuTrackerModal()" title="Настройки аккаунта RuTracker">
+        <span class="status-dot dot-gray" id="rtDot"></span>
+        <span id="rtText">RuTracker</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN NETFLIX VIEWPORT -->
+  <main class="netflix-main" id="netflixMain">
+
+    <!-- HOME / CATALOG VIEW -->
+    <div id="homeView">
+      
+      <!-- NETFLIX BILLBOARD (HERO BANNER) -->
+      <section class="netflix-billboard" id="billboardSection">
+        <div class="billboard-backdrop-wrap">
+          <img id="billboardImg" src="" alt="Backdrop" class="billboard-backdrop">
+          <div class="billboard-vignette"></div>
+          <div class="billboard-bottom-gradient"></div>
+        </div>
+
+        <div class="billboard-content">
+          <div class="billboard-badge-row">
+            <span class="n-series-badge">N ФИЛЬМ</span>
+            <span class="top10-ribbon">ТОП 10 В РОССИИ СЕГОДНЯ</span>
+          </div>
+
+          <h1 class="billboard-title" id="billboardTitle">ДЮНА: ЧАСТЬ ВТОРАЯ</h1>
+          
+          <div class="billboard-meta">
+            <span class="billboard-match" id="billboardMatch">99% совпадение</span>
+            <span class="billboard-year" id="billboardYear">2024</span>
+            <span class="age-badge" id="billboardAge">16+</span>
+            <span class="duration-badge" id="billboardDuration">2 ч 46 мин</span>
+            <span class="quality-badge" id="billboardQuality">Ultra HD 4K</span>
+            <span class="audio-badge" id="billboardAudio">5.1</span>
+          </div>
+
+          <p class="billboard-plot" id="billboardPlot">
+            Пол Атрейдес объединяется с фременами, чтобы отомстить заговорщикам, уничтожившим его семью, и предотвратить катастрофическое будущее Вселенной.
+          </p>
+
+          <div class="billboard-buttons">
+            <button class="netflix-play-btn" onclick="playBillboardMovie()">
+              <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor">
+                <path d="M8 5v14l11-7z"/>
+              </svg>
+              <span>Смотреть</span>
+            </button>
+            <button class="netflix-info-btn" onclick="openBillboardDetails()">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
+              </svg>
+              <span>Подробнее</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- NETFLIX ROWS / CAROUSELS -->
+      <section class="netflix-rows-container" id="rowsContainer">
+        <!-- Rendered dynamically by app.js -->
+      </section>
+
+    </div>
+
+    <!-- SEARCH RESULTS VIEW (GRID OF NETFLIX CARDS) -->
+    <div id="searchResultsView" style="display: none;">
+      <div class="search-results-header">
+        <h2 class="search-heading">Результаты по запросу: <span id="searchQueryLabel"></span></h2>
+      </div>
+
+      <!-- Loading Spinner -->
+      <div class="netflix-loader" id="searchLoader" style="display: none;">
+        <div class="netflix-spinner-circle"></div>
+        <p>Ищем лучшие раздачи с RuTracker...</p>
+      </div>
+
+      <!-- Grid of Cards -->
+      <div class="netflix-grid" id="searchGrid"></div>
+    </div>
+
+  </main>
+
+  <!-- NETFLIX DETAIL & EDITIONS MODAL (1 В 1) -->
+  <div class="netflix-modal-backdrop" id="movieDetailModal" style="display: none;" onclick="closeModalOnBackdrop(event)">
+    <div class="netflix-modal-card">
+      <button class="modal-close-circle" onclick="closeDetailModal()">✕</button>
+
+      <!-- Modal Hero Backdrop -->
+      <div class="modal-hero">
+        <img id="modalBackdrop" src="" alt="Backdrop" class="modal-backdrop-img">
+        <div class="modal-hero-gradient"></div>
+        <div class="modal-hero-actions">
+          <h2 class="modal-hero-title" id="modalTitle">Название</h2>
+          <div class="modal-hero-buttons">
+            <button class="netflix-play-btn" onclick="playSelectedMovie()">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                <path d="M8 5v14l11-7z"/>
+              </svg>
+              <span>Смотреть</span>
+            </button>
+            <button class="circle-action-btn" title="В избранное">＋</button>
+            <button class="circle-action-btn" title="Нравится">👍</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal Body Content -->
+      <div class="modal-content">
+        <div class="modal-columns">
+          
+          <!-- Left Column: Details -->
+          <div class="modal-left">
+            <div class="modal-meta-row">
+              <span class="billboard-match" id="modalMatch">98% совпадение</span>
+              <span class="billboard-year" id="modalYear">2024</span>
+              <span class="age-badge" id="modalAge">16+</span>
+              <span class="quality-badge" id="modalQuality">Ultra HD 4K</span>
+              <span class="audio-badge" id="modalAudio">Dolby 5.1</span>
+            </div>
+
+            <p class="modal-plot" id="modalPlot">Описание...</p>
+
+            <div class="modal-genres" id="modalGenres">Жанры: Фантастика, Драма</div>
+          </div>
+
+          <!-- Right Column: Cast & Routing -->
+          <div class="modal-right">
+            <div class="info-block">
+              <span class="info-label">Рейтинг IMDb:</span>
+              <span class="info-val" id="modalRating">★ 8.8 / 10</span>
+            </div>
+            <div class="info-block">
+              <span class="info-label">Качество:</span>
+              <span class="info-val">4K UHD HDR / 1080p BDRip</span>
+            </div>
+            <div class="info-block">
+              <span class="info-label">Туннелирование:</span>
+              <span class="info-val" style="color: #4cd137;">✔ В обход VPN (прямой интернет)</span>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- TV SHOW EPISODES SELECTOR (IF SERIES) -->
+        <div class="modal-episodes-section" id="modalEpisodesSection" style="display: none;">
+          <div class="episodes-header">
+            <div class="episodes-header-left">
+              <h3>Серии и эпизоды</h3>
+              <span class="episodes-count-badge" id="modalEpisodeCount"></span>
+            </div>
+            <div class="season-select-wrap">
+              <select class="season-select" id="seasonSelect" onchange="switchModalSeason(this.value)">
+                <option value="1">Сезон 1</option>
+              </select>
+            </div>
+          </div>
+          <div class="episodes-grid" id="modalEpisodesGrid"></div>
+        </div>
+
+        <!-- VERIFIED EDITIONS SELECTOR (ПРОВЕРЕННЫЕ ВАРИАНТЫ РАЗДАЧ) -->
+        <div class="modal-editions-section">
+          <div class="editions-header">
+            <div class="editions-title-wrap">
+              <span class="editions-crown">👑</span>
+              <h3>Проверенные варианты качества и озвучки</h3>
+            </div>
+            <span class="editions-subtitle">Выберите подходящую версию релиза для мгновенного просмотра</span>
+          </div>
+
+          <div class="editions-list" id="modalEditionsList">
+            <!-- Rendered by app.js -->
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+  <!-- NETFLIX FULLSCREEN VIDEO PLAYER (1 В 1) -->
+  <div class="netflix-player-view" id="netflixPlayerView" style="display: none;">
+    <div class="netflix-player-viewport" id="netflixViewport">
+      
+      <!-- Video Element -->
+      <video id="netflixVideo" preload="auto" playsinline tabindex="0"></video>
+
+      <!-- Center Big Netflix Spinner -->
+      <div class="netflix-center-spinner" id="playerSpinner" style="display: none;">
+        <div class="n-spinner-arc"></div>
+        <div class="n-spinnerText" id="spinnerText">Подключение к раздаче в обход VPN...</div>
+      </div>
+
+      <!-- Top Overlay Controls -->
+      <div class="netflix-player-top" id="playerTop">
+        <button class="n-back-circle-btn" onclick="exitNetflixPlayer()" title="Назад (Esc)">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
+            <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+          </svg>
+        </button>
+        <div class="player-title-info">
+          <div class="player-main-title" id="playerTitle">Название</div>
+          <div class="player-sub-title" id="playerSubtitle">4K UHD • Лицензионный дубляж</div>
+        </div>
+      </div>
+
+      <!-- Center Click Ripple Animation -->
+      <div class="n-center-ripple" id="playerCenterRipple">
+        <div class="n-ripple-icon" id="playerRippleIcon">▶</div>
+      </div>
+
+      <!-- Bottom Overlay Controls (Netflix Exact Layout) -->
+      <div class="netflix-player-bottom" id="playerBottom">
+        
+        <!-- Scrubber Progress Bar -->
+        <div class="n-progress-container" id="playerProgressContainer" onmousemove="handleProgressHover(event)" onmouseleave="hideProgressHover()" onclick="handleProgressClick(event)">
+          <div class="n-hover-timestamp" id="playerHoverTime">00:00</div>
+          <div class="n-progress-track">
+            <div class="n-progress-buffered" id="playerProgressBuffered"></div>
+            <div class="n-progress-played" id="playerProgressPlayed"></div>
+            <div class="n-scrubber-handle" id="playerScrubberHandle"></div>
+          </div>
+        </div>
+
+        <!-- Controls Bottom Bar -->
+        <div class="n-controls-bar">
+          
+          <!-- Left Controls -->
+          <div class="n-controls-left">
+            <!-- Play/Pause -->
+            <button class="n-btn" id="playBtn" onclick="togglePlay()" title="Воспроизведение (Пробел)">
+              <svg id="nPlayIcon" viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
+                <path d="M8 5v14l11-7z"/>
+              </svg>
+              <svg id="nPauseIcon" viewBox="0 0 24 24" width="28" height="28" fill="currentColor" style="display: none;">
+                <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+              </svg>
+            </button>
+
+            <!-- Rewind 10s -->
+            <button class="n-btn" onclick="seekRelative(-10)" title="Назад на 10 секунд (← или j)">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
+              </svg>
+              <span class="btn-subtext">10</span>
+            </button>
+
+            <!-- Fast Forward 10s -->
+            <button class="n-btn" onclick="seekRelative(10)" title="Вперёд на 10 секунд (→ или l)">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                <path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/>
+              </svg>
+              <span class="btn-subtext">10</span>
+            </button>
+
+            <!-- Volume Control -->
+            <div class="n-volume-wrap">
+              <button class="n-btn" id="volumeBtn" onclick="toggleMute()" title="Звук (m)">
+                <svg id="nVolHigh" viewBox="0 0 24 24" width="26" height="26" fill="currentColor">
+                  <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+                </svg>
+                <svg id="nVolMute" viewBox="0 0 24 24" width="26" height="26" fill="currentColor" style="display: none;">
+                  <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+                </svg>
+              </button>
+              <div class="n-volume-slider-box">
+                <input type="range" class="n-volume-slider" id="playerVolumeSlider" min="0" max="1" step="0.05" value="1" oninput="changeVolume(this.value)">
+              </div>
+            </div>
+
+            <!-- Time Display -->
+            <div class="n-time-label">
+              <span id="playerCurrentTime">0:00</span>
+              <span class="sep">/</span>
+              <span id="playerDuration">0:00</span>
+            </div>
+          </div>
+
+          <!-- Center Status Badge -->
+          <div class="n-controls-center">
+            <div class="n-stream-health-pill">
+              <span class="pulse-dot"></span>
+              <span id="playerHealthText">⚡ В обход VPN (en0) • 0.0 МБ/с • Буфер 0%</span>
+            </div>
+          </div>
+
+          <!-- Right Controls -->
+          <div class="n-controls-right">
+            <!-- Next Episode -->
+            <button class="n-btn" id="playerNextEpBtn" onclick="playNextEpisode()" title="Следующая серия" style="display: none;">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+              </svg>
+            </button>
+
+            <!-- Episodes Drawer Toggle -->
+            <button class="n-btn" id="playerEpisodesMenuBtn" onclick="togglePlayerEpisodesMenu()" title="Список серий" style="display: none;">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                <path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/>
+              </svg>
+            </button>
+
+            <!-- Audio Tracks & Sound Mode -->
+            <div class="n-dropdown-wrap">
+              <button class="n-btn" id="playerAudioBtn" onclick="toggleAudioDropdown()" title="Звук и аудиодорожки">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                  <path d="M12 3v9.28a4.39 4.39 0 0 0-1.5-.28C8.01 12 6 14.01 6 16.5S8.01 21 10.5 21c2.31 0 4.2-1.75 4.45-4H15V6h4V3h-7z"/>
+                </svg>
+              </button>
+              <div class="n-dropdown-menu" id="playerAudioMenu" style="display: none;">
+                <div class="n-drop-header">Режим звука</div>
+                <div class="n-drop-item active" id="audioModeAac" onclick="setAudioMode('aac')">🔊 Браузер (AAC Stereo, 100% со звуком)</div>
+                <div class="n-drop-item" id="audioModeDirect" onclick="setAudioMode('direct')">🎬 Прямой (Без перекодирования)</div>
+                <div class="n-drop-header" id="audioTracksHeader" style="display:none; margin-top:6px; border-top:1px solid #333; padding-top:6px;">Аудиодорожки</div>
+                <div id="audioTracksList"></div>
+              </div>
+            </div>
+
+            <!-- Playback Speed -->
+            <div class="n-dropdown-wrap">
+              <button class="n-btn n-text-btn" id="playerSpeedBtn" onclick="toggleSpeedDropdown()" title="Скорость воспроизведения">
+                <span id="playerSpeedText">1x</span>
+              </button>
+              <div class="n-dropdown-menu" id="playerSpeedMenu" style="display: none;">
+                <div class="n-drop-item" onclick="setSpeed(0.5)">0.5x</div>
+                <div class="n-drop-item" onclick="setSpeed(0.75)">0.75x</div>
+                <div class="n-drop-item active" onclick="setSpeed(1.0)">1.0x (Обычная)</div>
+                <div class="n-drop-item" onclick="setSpeed(1.25)">1.25x</div>
+                <div class="n-drop-item" onclick="setSpeed(1.5)">1.5x</div>
+              </div>
+            </div>
+
+            <!-- Fullscreen -->
+            <button class="n-btn" onclick="toggleFullscreen()" title="Полный экран (f)">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
+              </svg>
+            </button>
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- Netflix Next Episode Countdown Toast -->
+      <div class="n-next-ep-toast" id="nextEpToast" style="display: none;">
+        <div class="next-ep-badge">СЛЕДУЮЩАЯ СЕРИЯ ЧЕРЕЗ <span id="nextEpTimer">5</span> СЕК</div>
+        <div class="next-ep-title" id="nextEpTitle">2. Название серии</div>
+        <div class="next-ep-actions">
+          <button class="next-ep-play-btn" onclick="playNextEpisodeImmediately()">Смотреть сейчас ▶</button>
+          <button class="next-ep-cancel-btn" onclick="cancelNextEpisodeCountdown()">Отмена ✕</button>
+        </div>
+      </div>
+
+      <!-- Player Episodes Popup Drawer -->
+      <div class="n-player-episodes-drawer" id="playerEpisodesDrawer" style="display: none;">
+        <div class="drawer-header">
+          <div class="drawer-title-row">
+            <h3>Серии</h3>
+            <select class="drawer-season-select" id="drawerSeasonSelect" onchange="switchDrawerSeason(this.value)">
+              <option value="1">Сезон 1</option>
+            </select>
+          </div>
+          <button class="drawer-close" onclick="togglePlayerEpisodesMenu()" title="Закрыть">✕</button>
+        </div>
+        <div class="drawer-items-list" id="playerEpisodesList"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- RUTRACKER MODAL -->
+  <div class="netflix-modal-backdrop" id="rutrackerModal" style="display: none;" onclick="closeModalOnBackdrop(event)">
+    <div class="netflix-settings-card">
+      <div class="settings-modal-header">
+        <h3>Подключение к RuTracker.net</h3>
+        <button class="modal-close-circle" onclick="closeRuTrackerModal()">✕</button>
+      </div>
+      <div class="settings-modal-body">
+        <p class="settings-desc">
+          Поиск раздач и магнет-ссылок осуществляется через <strong>RuTracker.net</strong> с авторизацией.
+        </p>
+        <div class="settings-tabs">
+          <button class="s-tab active" id="tabLoginBtn" onclick="switchRuTrackerTab('login')">Логин и пароль</button>
+          <button class="s-tab" id="tabCookieBtn" onclick="switchRuTrackerTab('cookie')">Через Cookie (bb_session)</button>
+        </div>
+
+        <div id="paneLogin">
+          <div class="n-input-group">
+            <label>Логин на RuTracker:</label>
+            <input type="text" id="rtUsernameInput" placeholder="Ваш логин">
+          </div>
+          <div class="n-input-group">
+            <label>Пароль:</label>
+            <input type="password" id="rtPasswordInput" placeholder="••••••••">
+          </div>
+          <button class="netflix-red-btn" onclick="submitRuTrackerLogin()">Войти в RuTracker</button>
+        </div>
+
+        <div id="paneCookie" style="display: none;">
+          <div class="n-input-group">
+            <label>Строка Cookie (bb_session):</label>
+            <textarea id="rtCookieInput" rows="3" placeholder="bb_session=...; bb_ssl=1"></textarea>
+          </div>
+          <button class="netflix-red-btn" onclick="submitRuTrackerCookie()">Сохранить Cookie</button>
+        </div>
+
+        <div id="rtStatusMsg" class="settings-status-msg"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ROUTING & BANDWIDTH MODAL -->
+  <div class="netflix-modal-backdrop" id="settingsModal" style="display: none;" onclick="closeModalOnBackdrop(event)">
+    <div class="netflix-settings-card">
+      <div class="settings-modal-header">
+        <h3>Раздельное туннелирование и сеть</h3>
+        <button class="modal-close-circle" onclick="closeSettingsModal()">✕</button>
+      </div>
+      <div class="settings-modal-body">
+        
+        <div class="split-tunnel-info">
+          <div class="tunnel-row">
+            <span class="status-dot dot-green"></span>
+            <div>
+              <strong>Поиск и RuTracker (магнет-ссылки):</strong>
+              <div class="tunnel-sub" id="netRtRoute">Через VPN / Прокси (127.0.0.1:10809)</div>
+            </div>
+          </div>
+          <div class="tunnel-row">
+            <span class="status-dot dot-green"></span>
+            <div>
+              <strong>Трансляция торрента и видеопоток:</strong>
+              <div class="tunnel-sub" id="netTorrentRoute">В обход VPN через en0 (прямой домашний интернет)</div>
+            </div>
+          </div>
+          <div class="tunnel-tip">
+            ✔ Торрент-трафик не забивает ваш VPN-канал, интернет остаётся стабильным и быстрым.
+          </div>
+        </div>
+
+        <div class="n-input-group" style="margin-top: 16px;">
+          <label>Прокси для RuTracker (автоопределение v2RayTun / Clash):</label>
+          <input type="text" id="customProxyInput" placeholder="http://127.0.0.1:10809">
+        </div>
+
+        <div class="n-input-group">
+          <label>Ограничение скорости загрузки видео:</label>
+          <select id="downloadLimitSelect">
+            <option value="0">Без ограничений (максимум)</option>
+            <option value="15000">15 МБ/с (быстро)</option>
+            <option value="8000" selected>8 МБ/с (стабильно)</option>
+            <option value="4000">4 МБ/с (для слабого интернета)</option>
+          </select>
+        </div>
+
+        <button class="netflix-red-btn" onclick="saveSpeedLimits()">Применить настройки</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
