@@ -33,7 +33,12 @@ const state = {
   tvZone: 'cards', // 'header' | 'tabs' | 'cards' | 'bottom'
   tvFocusIndex: 0, // 0..9 index within cards grid
   tvTabIndex: 0,   // active category tab index
-  tvBottomIndex: 1 // 0: prev, 1: next, 2: search
+  tvBottomIndex: 1, // 0: prev, 1: next, 2: search
+  viewMode: 'rows', // 'rows' or 'canvas' (полотно)
+  currentCategory: 'all',
+  canvasItems: [],
+  canvasPage: 1,
+  canvasLoading: false
 };
 
 // DOM Elements
@@ -42,6 +47,10 @@ const searchBox = document.getElementById('searchBox');
 const netflixSearchInput = document.getElementById('netflixSearchInput');
 const searchClearBtn = document.getElementById('searchClearBtn');
 const homeView = document.getElementById('homeView');
+const rowsContainer = document.getElementById('rowsContainer');
+const canvasContainer = document.getElementById('canvasContainer');
+const btnViewRows = document.getElementById('btnViewRows');
+const btnViewCanvas = document.getElementById('btnViewCanvas');
 const searchResultsView = document.getElementById('searchResultsView');
 const searchQueryLabel = document.getElementById('searchQueryLabel');
 const searchLoader = document.getElementById('searchLoader');
@@ -210,13 +219,20 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-// Header scroll effect
+// Header scroll effect and infinite canvas scrolling
 function setupScrollHeader() {
   window.addEventListener('scroll', () => {
     if (window.scrollY > 40) {
       netflixHeader.classList.add('scrolled');
     } else {
       netflixHeader.classList.remove('scrolled');
+    }
+
+    // Infinite canvas scroll
+    if (state.viewMode === 'canvas' && homeView && homeView.style.display !== 'none') {
+      if ((window.innerHeight + window.scrollY) >= (document.body.offsetHeight - 650)) {
+        loadMoreCanvasItems();
+      }
     }
   });
 }
@@ -587,7 +603,85 @@ async function saveActiveMovieToDisk() {
   }
 }
 
+function setViewMode(mode) {
+  state.viewMode = mode;
+  if (btnViewRows) btnViewRows.classList.toggle('active', mode === 'rows');
+  if (btnViewCanvas) btnViewCanvas.classList.toggle('active', mode === 'canvas');
+  if (rowsContainer) rowsContainer.style.display = (mode === 'rows') ? 'flex' : 'none';
+  if (canvasContainer) {
+    canvasContainer.style.display = (mode === 'canvas') ? 'grid' : 'none';
+    if (mode === 'canvas') renderCanvasItems();
+  }
+}
+
+function renderCanvasCardHtml(item) {
+  const cardImg = item.backdrop || item.poster || generateCardSvg(item.title, item.year, item.quality);
+  const cardYear = item.year || item.display_year || '';
+  return `
+    <div class="grid-card canvas-card" onclick="openMovieDetails(${JSON.stringify(item).replace(/"/g, '&quot;')})">
+      <div class="grid-card-poster-wrap">
+        <img src="${cardImg}" class="grid-card-poster-img" alt="${escapeHtml(item.title)}" onerror="this.onerror=null; this.src=generateCardSvg('${escapeJs(item.title)}', '${escapeJs(cardYear)}', '${escapeJs(item.quality || 'HD')}');">
+        <div class="grid-card-hover-overlay">
+          <div class="grid-play-icon">▶</div>
+        </div>
+        <span class="grid-quality-pill">${escapeHtml(item.quality || '4K UHD')}</span>
+        ${item.is_series ? '<span class="grid-season-pill" style="left:auto; right:8px;">Сериал</span>' : ''}
+        <div class="grid-card-title-bar">${escapeHtml(item.title)}${cardYear ? ` (${escapeHtml(cardYear)})` : ''}</div>
+      </div>
+      <div class="grid-card-body">
+        <div class="grid-card-meta">
+          <span style="color:#ffcc00; font-weight:800;">★ ${item.rating || '8.8'}</span>
+          <span>${cardYear}</span>
+          <span style="color:#aaa;">${escapeHtml(item.genre || '')}</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderCanvasItems() {
+  if (!canvasContainer) return;
+  if (!state.canvasItems || state.canvasItems.length === 0) {
+    canvasContainer.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding: 40px; color:#888;">Загрузка полотна фильмов...</div>';
+    return;
+  }
+  canvasContainer.innerHTML = state.canvasItems.map(item => renderCanvasCardHtml(item)).join('');
+}
+
+async function loadMoreCanvasItems() {
+  if (state.canvasLoading) return;
+  state.canvasLoading = true;
+  state.canvasPage++;
+  try {
+    const res = await fetch(`/api/catalog/more?category=${encodeURIComponent(state.currentCategory)}&page=${state.canvasPage}`);
+    const data = await res.json();
+    const items = data.items || [];
+    if (items.length > 0) {
+      const seen = new Set(state.canvasItems.map(i => i.title));
+      const newItems = [];
+      for (const it of items) {
+        if (!seen.has(it.title)) {
+          seen.add(it.title);
+          newItems.push(it);
+          state.canvasItems.push(it);
+        }
+      }
+      if (newItems.length > 0 && canvasContainer && state.viewMode === 'canvas') {
+        const extraHtml = newItems.map(it => renderCanvasCardHtml(it)).join('');
+        canvasContainer.insertAdjacentHTML('beforeend', extraHtml);
+      }
+    }
+  } catch (e) {
+    console.warn('Canvas load more error:', e);
+  } finally {
+    state.canvasLoading = false;
+  }
+}
+
 function switchCategory(cat) {
+  state.currentCategory = cat;
+  state.canvasPage = 1;
+
   document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
   const links = document.querySelectorAll('.nav-link');
   if (cat === 'all' && links[0]) links[0].classList.add('active');
@@ -604,37 +698,78 @@ function switchCategory(cat) {
   let billboardItem = state.catalog.billboard;
 
   if (cat === 'series') {
-    filteredCats = cats.filter(c => c.id === 'series' || c.title.toLowerCase().includes('сериал'));
     const allSeries = cats.flatMap(c => c.items || []).filter(item => item.is_series);
-    if (allSeries.length > 0) {
-      billboardItem = allSeries[0];
-      if (filteredCats.length === 0) {
-        filteredCats = [{ id: 'series', title: 'Популярные сериалы', items: allSeries }];
-      }
+    const seenS = new Set();
+    const dedupedSeries = [];
+    for (const s of allSeries) {
+      if (!seenS.has(s.title)) { seenS.add(s.title); dedupedSeries.push(s); }
     }
+    if (dedupedSeries.length > 0) billboardItem = dedupedSeries[0];
+    state.canvasItems = dedupedSeries;
+
+    filteredCats = [
+      { id: 'series_trending', title: '🔥 Главные сериалы прямо сейчас', items: dedupedSeries.slice(0, 15) },
+      { id: 'series_top', title: '⭐ Шедевры с высоким рейтингом (IMDb 8.5+)', items: dedupedSeries.filter(s => parseFloat(s.rating || '0') >= 8.5) },
+      { id: 'series_new', title: '🆕 Свежие премьеры и сезоны 2024', items: dedupedSeries.filter(s => (s.year || '').includes('2024')) },
+      { id: 'series_drama', title: '🎭 Драматические и криминальные саги', items: dedupedSeries.filter(s => (s.genre || '').includes('Драма') || (s.genre || '').includes('Криминал')) },
+      { id: 'series_scifi_anime', title: '🚀 Фантастика и Аниме-сериалы', items: dedupedSeries.filter(s => (s.genre || '').includes('Фантастика') || (s.genre || '').includes('Анимация') || (s.genre || '').includes('Аниме')) },
+      { id: 'series_comedies', title: '😂 Комедийные хиты', items: dedupedSeries.filter(s => (s.genre || '').includes('Комедия')) }
+    ].filter(r => r.items && r.items.length > 0);
+
   } else if (cat === 'movies') {
-    filteredCats = cats.filter(c => c.id !== 'series' && !c.title.toLowerCase().includes('сериал'));
     const allMovies = cats.flatMap(c => c.items || []).filter(item => !item.is_series);
-    if (allMovies.length > 0) {
-      billboardItem = allMovies[0];
+    const seenM = new Set();
+    const dedupedMovies = [];
+    for (const m of allMovies) {
+      if (!seenM.has(m.title)) { seenM.add(m.title); dedupedMovies.push(m); }
     }
+    if (dedupedMovies.length > 0) billboardItem = dedupedMovies[0];
+    state.canvasItems = dedupedMovies;
+
+    filteredCats = [
+      { id: 'movies_trending', title: '🔥 Главные блокбастеры и кинохиты', items: dedupedMovies.slice(0, 15) },
+      { id: 'movies_top', title: '🏆 Золотая коллекция (Рейтинг 8.0+)', items: dedupedMovies.filter(m => parseFloat(m.rating || '0') >= 8.0) },
+      { id: 'movies_new', title: '🆕 Премьеры 2024 года', items: dedupedMovies.filter(m => (m.year || '').includes('2024')) },
+      { id: 'movies_action', title: '💥 Боевики и триллеры', items: dedupedMovies.filter(m => (m.genre || '').includes('Боевик') || (m.genre || '').includes('Триллер')) },
+      { id: 'movies_scifi', title: '🚀 Фантастика и космос', items: dedupedMovies.filter(m => (m.genre || '').includes('Фантастика') || (m.genre || '').includes('Приключения')) },
+      { id: 'movies_comedy', title: '😂 Комедии для отличного настроения', items: dedupedMovies.filter(m => (m.genre || '').includes('Комедия')) },
+      { id: 'movies_drama', title: '🎭 Глубокие драмы', items: dedupedMovies.filter(m => (m.genre || '').includes('Драма') || (m.genre || '').includes('История')) }
+    ].filter(r => r.items && r.items.length > 0);
+
   } else if (cat === 'trending') {
-    filteredCats = cats.filter(c => c.id === 'trending' || c.is_top10);
+    filteredCats = cats.filter(c => c.id === 'trending' || c.is_top10 || c.id === 'new_releases');
     billboardItem = state.catalog.billboard;
+    state.canvasItems = cats.flatMap(c => c.items || []);
+
   } else if (cat === 'all') {
     filteredCats = cats;
     billboardItem = state.catalog.billboard;
-  } else {
-    // Exact genre ID match from ALL_GENRES
-    const matched = cats.find(c => c.id === cat);
-    if (matched) {
-      filteredCats = [matched];
-      if (matched.items && matched.items.length > 0) {
-        billboardItem = matched.items[0];
+    const seenAll = new Set();
+    const dedupedAll = [];
+    for (const c of cats) {
+      for (const it of c.items || []) {
+        if (!seenAll.has(it.title)) { seenAll.add(it.title); dedupedAll.push(it); }
       }
+    }
+    state.canvasItems = dedupedAll;
+
+  } else {
+    // Exact genre ID match
+    const matched = cats.find(c => c.id === cat);
+    if (matched && matched.items && matched.items.length > 0) {
+      billboardItem = matched.items[0];
+      const gItems = matched.items;
+      state.canvasItems = gItems;
+
+      filteredCats = [
+        { id: `${cat}_top`, title: `🔥 Самые популярные: ${matched.title}`, items: gItems.slice(0, 12) },
+        { id: `${cat}_critics`, title: `⭐ Выбор критиков и зрителей (Рейтинг 8.0+)`, items: gItems.filter(i => parseFloat(i.rating || '0') >= 8.0) },
+        { id: `${cat}_new`, title: `🆕 Свежие релизы (2023–2024)`, items: gItems.filter(i => (i.year || '').includes('2023') || (i.year || '').includes('2024') || (i.year || '').includes('2025')) },
+        { id: `${cat}_all`, title: `👑 Все рекомендации раздела`, items: gItems }
+      ].filter(r => r.items && r.items.length > 0);
     } else {
       filteredCats = cats;
-      billboardItem = state.catalog.billboard;
+      state.canvasItems = cats.flatMap(c => c.items || []);
     }
   }
 
@@ -645,6 +780,10 @@ function switchCategory(cat) {
 
   if (billboardItem) renderBillboard(billboardItem);
   renderRows(filteredCats);
+
+  if (state.viewMode === 'canvas') {
+    renderCanvasItems();
+  }
 }
 
 async function performSearch(query) {
@@ -700,6 +839,7 @@ function renderSearchResults(data) {
             <div class="grid-play-icon">▶</div>
           </div>
           <span class="grid-quality-pill">${escapeHtml(item.quality || 'HD')}</span>
+          ${item.season_label ? `<span class="grid-season-pill">${escapeHtml(item.season_label)}</span>` : ''}
           <span class="grid-source-pill">${escapeHtml(item.source)}</span>
           <div class="grid-card-title-bar">${escapeHtml(cardTitle)}${cardYear ? ` (${escapeHtml(cardYear)})` : ''}</div>
         </div>
@@ -756,13 +896,21 @@ async function openMovieDetails(movie) {
     const data = await res.json();
     const verified = data.verified_editions || [];
     const results = data.results || [];
+    state.modalVerified = verified;
+    state.modalAllResults = results;
+
+    if (data.movie) {
+      if (data.movie.total_seasons) state.activeMovie.total_seasons = data.movie.total_seasons;
+      if (data.movie.is_series !== undefined) state.activeMovie.is_series = data.movie.is_series;
+    }
+
     renderModalEditions(verified, results);
 
-    // If series, load episodes from best release
-    const top = verified[0] || results[0];
-    const isSeries = movie.is_series || (top && (top.title.toLowerCase().includes('сезон') || top.title.toLowerCase().includes('сери') || top.title.toLowerCase().includes('s0')));
+    // If series, load episodes from best release (prefer multi-season complete pack or top verified)
+    const top = verified.find(r => r.is_multi_season) || verified[0] || results[0];
+    const isSeries = state.activeMovie.is_series || (top && (top.title.toLowerCase().includes('сезон') || top.title.toLowerCase().includes('сери') || top.title.toLowerCase().includes('s0')));
     if (isSeries && top) {
-      loadEpisodesForModal(top, movie);
+      loadEpisodesForModal(top, state.activeMovie);
     }
   } catch (err) {
     modalEditionsList.innerHTML = `<div style="color:#888;">Ошибка загрузки раздач: ${err.message}</div>`;
@@ -771,6 +919,8 @@ async function openMovieDetails(movie) {
 
 function openMovieDetailsWithTorrents(movie, verified, allResults) {
   state.activeMovie = movie;
+  state.modalVerified = verified || [];
+  state.modalAllResults = allResults || [];
   modalBackdrop.src = movie.poster;
   modalTitle.textContent = movie.title;
   modalMatch.textContent = `${movie.rating || '8.7'} IMDb`;
@@ -786,14 +936,14 @@ function openMovieDetailsWithTorrents(movie, verified, allResults) {
   movieDetailModal.style.display = 'flex';
   renderModalEditions(verified, allResults);
 
-  const top = (verified && verified[0]) || (allResults && allResults[0]);
+  const top = (verified && (verified.find(r => r.is_multi_season) || verified[0])) || (allResults && allResults[0]);
   const isSeries = movie.is_series || (top && (top.title.toLowerCase().includes('сезон') || top.title.toLowerCase().includes('сери') || top.title.toLowerCase().includes('s0')));
   if (isSeries && top) {
     loadEpisodesForModal(top, movie);
   }
 }
 
-async function loadEpisodesForModal(item, movie) {
+async function loadEpisodesForModal(item, movie, preferredSeason = null) {
   modalEpisodesSection.style.display = 'block';
   modalEpisodesGrid.innerHTML = `
     <div style="padding: 24px; text-align: center; color: #888;">
@@ -823,16 +973,34 @@ async function loadEpisodesForModal(item, movie) {
 
     if (data.is_series || state.modalVideoFiles.length > 1) {
       modalEpisodesSection.style.display = 'block';
-      const seasonKeys = Object.keys(state.modalSeasons);
-      if (seasonKeys.length > 0) {
-        seasonSelect.innerHTML = seasonKeys.map(s => `
-          <option value="${s}">Сезон ${s}</option>
+
+      // Collect all seasons present in this torrent AND across verified / results / total_seasons:
+      const torrentSeasons = Object.keys(state.modalSeasons).map(s => parseInt(s)).filter(n => !isNaN(n));
+      const maxKnownSeason = Math.max(
+        movie?.total_seasons || 1,
+        ...(torrentSeasons.length ? torrentSeasons : [1]),
+        ...(state.modalVerified || []).map(r => r.season_end || 1),
+        ...(state.modalAllResults || []).map(r => r.season_end || 1)
+      );
+
+      const allSeasonNums = [];
+      for (let s = 1; s <= maxKnownSeason; s++) {
+        allSeasonNums.push(s);
+      }
+
+      const activeSeason = preferredSeason || (torrentSeasons.length > 0 ? String(torrentSeasons[0]) : '1');
+      state.currentModalSeason = String(activeSeason);
+
+      if (allSeasonNums.length > 1) {
+        seasonSelect.innerHTML = allSeasonNums.map(s => `
+          <option value="${s}" ${String(s) === String(state.currentModalSeason) ? 'selected' : ''}>Сезон ${s}</option>
         `).join('');
-        state.currentModalSeason = seasonKeys[0];
+      } else if (allSeasonNums.length === 1) {
+        seasonSelect.innerHTML = `<option value="${allSeasonNums[0]}">Сезон ${allSeasonNums[0]}</option>`;
       } else {
         seasonSelect.innerHTML = '<option value="1">Серии</option>';
-        state.currentModalSeason = '1';
       }
+
       renderModalEpisodesList(movie);
     } else {
       modalEpisodesSection.style.display = 'none';
@@ -843,9 +1011,30 @@ async function loadEpisodesForModal(item, movie) {
   }
 }
 
-function switchModalSeason(s) {
-  state.currentModalSeason = s;
-  renderModalEpisodesList(state.activeMovie);
+async function switchModalSeason(s) {
+  state.currentModalSeason = String(s);
+  // 1. If currently loaded torrent already has this season's episodes:
+  if (state.modalSeasons && state.modalSeasons[s] && state.modalSeasons[s].length > 0) {
+    renderModalEpisodesList(state.activeMovie);
+    return;
+  }
+
+  // 2. Otherwise find a release specifically matching this season in verified / all results
+  const sNum = parseInt(s);
+  const candidates = [...(state.modalVerified || []), ...(state.modalAllResults || [])];
+  const targetRel = candidates.find(r => {
+    if (r === state.modalTorrentItem) return false;
+    if (r.season_start && r.season_end && sNum >= r.season_start && sNum <= r.season_end) return true;
+    if (r.season_label && r.season_label.includes(`Сезон ${sNum}`)) return true;
+    const t = (r.title || '').toLowerCase();
+    return t.includes(`s0${sNum}`) || t.includes(`s${sNum}`) || t.includes(`${sNum} сезон`) || t.includes(`сезон ${sNum}`);
+  });
+
+  if (targetRel) {
+    await loadEpisodesForModal(targetRel, state.activeMovie, s);
+  } else {
+    renderModalEpisodesList(state.activeMovie);
+  }
 }
 
 function renderModalEpisodesList(movie) {
@@ -960,11 +1149,17 @@ function renderModalEditions(verifiedList, allList) {
     if (badge.includes('4K')) tagClass = 'tag-4k-gold';
     if (badge.includes('БЫСТРЫЙ')) tagClass = 'tag-fast-green';
     if (badge.includes('ОЗВУЧКА')) tagClass = 'tag-audio-purple';
+    if (badge.includes('СЕЗОН') || badge.includes('НОВИНКА')) tagClass = 'tag-fast-green';
+
+    const isSeriesItem = item.is_series || item.season_label || (state.activeMovie && state.activeMovie.is_series);
 
     return `
       <div class="edition-item-card">
         <div class="edition-left-info">
-          <span class="edition-badge-tag ${tagClass}">${badge}</span>
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:4px;">
+            <span class="edition-badge-tag ${tagClass}">${badge}</span>
+            ${item.season_label ? `<span class="ed-pill" style="color:#e5a00d; font-weight:800; background:rgba(229,160,13,0.15); border:1px solid rgba(229,160,13,0.3);">${escapeHtml(item.season_label)}</span>` : ''}
+          </div>
           <div class="edition-title">${escapeHtml(item.curated_category || item.title)}</div>
           <div class="edition-details-text">${escapeHtml(item.curated_desc || item.title)}</div>
           <div class="edition-tags-row">
@@ -975,7 +1170,12 @@ function renderModalEditions(verifiedList, allList) {
           </div>
         </div>
 
-        <div class="edition-actions">
+        <div class="edition-actions" style="display:flex; gap:8px; align-items:center;">
+          ${isSeriesItem ? `
+            <button class="n-secondary-btn" style="background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.25); color:#fff; padding:7px 14px; border-radius:4px; cursor:pointer; font-size:0.85rem;" onclick="loadEpisodesForModal(${JSON.stringify(item).replace(/"/g, '&quot;')}, state.activeMovie)">
+              📑 Серии
+            </button>
+          ` : ''}
           <button class="n-edition-play-btn" onclick="startNetflixStream(${JSON.stringify(item).replace(/"/g, '&quot;')})">
             <span>▶ Смотреть</span>
           </button>
@@ -1010,25 +1210,34 @@ function showAllTorrentReleases(allList) {
     return `<span class="ed-pill" style="color:#e5a00d; background:rgba(229,160,13,0.12); font-weight:700;">🟡 ${s} сидов</span>`;
   }
 
-  const extraHtml = allList.map(item => `
-    <div class="edition-item-card" style="border-left: 2px solid #444;">
-      <div class="edition-left-info">
-        <div class="edition-title" style="font-size:0.95rem;">${escapeHtml(item.title)}</div>
-        <div class="edition-tags-row">
-          ${getSeedPill(item.seeds)}
-          <span class="ed-pill">${item.source}</span>
-          <span class="ed-pill">${item.quality || 'HD'}</span>
-          <span class="ed-pill">${escapeHtml(item.audio || 'Звук')}</span>
-          <span class="ed-pill">💾 ${item.size}</span>
+  const extraHtml = allList.map(item => {
+    const isSeriesItem = item.is_series || item.season_label || (state.activeMovie && state.activeMovie.is_series);
+    return `
+      <div class="edition-item-card" style="border-left: 2px solid #444;">
+        <div class="edition-left-info">
+          <div class="edition-title" style="font-size:0.95rem;">${escapeHtml(item.title)}</div>
+          <div class="edition-tags-row">
+            ${getSeedPill(item.seeds)}
+            ${item.season_label ? `<span class="ed-pill" style="color:#e5a00d; font-weight:700;">${escapeHtml(item.season_label)}</span>` : ''}
+            <span class="ed-pill">${item.source}</span>
+            <span class="ed-pill">${item.quality || 'HD'}</span>
+            <span class="ed-pill">${escapeHtml(item.audio || 'Звук')}</span>
+            <span class="ed-pill">💾 ${item.size}</span>
+          </div>
+        </div>
+        <div class="edition-actions" style="display:flex; gap:8px; align-items:center;">
+          ${isSeriesItem ? `
+            <button class="n-secondary-btn" style="background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.25); color:#fff; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:0.8rem;" onclick="loadEpisodesForModal(${JSON.stringify(item).replace(/"/g, '&quot;')}, state.activeMovie)">
+              📑 Серии
+            </button>
+          ` : ''}
+          <button class="n-edition-play-btn" onclick="startNetflixStream(${JSON.stringify(item).replace(/"/g, '&quot;')})">
+            <span>▶ Смотреть</span>
+          </button>
         </div>
       </div>
-      <div class="edition-actions">
-        <button class="n-edition-play-btn" onclick="startNetflixStream(${JSON.stringify(item).replace(/"/g, '&quot;')})">
-          <span>▶ Смотреть</span>
-        </button>
-      </div>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 
   modalEditionsList.insertAdjacentHTML('beforeend', extraHtml);
 }

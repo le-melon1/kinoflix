@@ -199,18 +199,24 @@ async def search(
     # Enrich each release with distinct artwork and title from TMDB
     results = await enrich_search_results(results)
 
-    # Canonical movie metadata directly from online discovery
+    has_seasons = any(r.get("season_label") for r in results)
+    is_tv = online_info.get("is_series", False) or has_seasons
+    max_season = max([r.get("season_end") or 1 for r in results if r.get("season_end")], default=1)
+    duration_str = f"{max_season} Сезон{'а' if 1 < max_season < 5 else ('ов' if max_season >= 5 else '')}" if is_tv and max_season > 1 else ("1 Сезон" if is_tv else "2 ч 15 мин")
+
     movie_info = {
         "title": online_info.get("ru_title") or query,
         "original_title": online_info.get("orig_title") or query,
-        "year": online_info.get("year") or "2024",
+        "year": (results[0].get("display_year") if results else None) or online_info.get("year") or "2024",
         "rating": online_info.get("rating") or "8.5",
         "poster": online_info.get("poster") or (results[0].get("poster") if results else None),
         "backdrop": online_info.get("backdrop") or (results[0].get("backdrop") if results else None),
         "plot": online_info.get("overview") or "",
-        "genre": "Сериал" if online_info.get("is_series") else "Фильм",
-        "duration_seconds": 2700 if online_info.get("is_series") else (results[0].get("duration_seconds", 5400) if results else 5400),
-        "is_series": online_info.get("is_series", False)
+        "genre": "Сериал" if is_tv else "Фильм",
+        "duration": duration_str,
+        "duration_seconds": 2700 if is_tv else (results[0].get("duration_seconds", 5400) if results else 5400),
+        "is_series": is_tv,
+        "total_seasons": max_season
     }
     verified_cards = curate_verified_editions(results, min_seeds=3)
 

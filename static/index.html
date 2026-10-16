@@ -114,16 +114,31 @@
         </div>
       </section>
 
-      <!-- GENRE FILTER BAR (ВСЕ 22 ЖАНРА) -->
+      <!-- GENRE FILTER BAR (ВСЕ 22 ЖАНРА) & VIEW TOGGLE (РЯДЫ / ПОЛОТНО) -->
       <div class="genre-filter-container" id="genreFilterContainer">
-        <div class="genre-filter-scroll" id="genreFilterBar">
-          <!-- Populated dynamically by app.js -->
+        <div class="genre-filter-wrapper">
+          <div class="genre-filter-scroll" id="genreFilterBar">
+            <!-- Populated dynamically by app.js -->
+          </div>
+          <div class="view-mode-toggle" id="viewModeToggle">
+            <button class="view-btn active" id="btnViewRows" onclick="setViewMode('rows')" title="Просмотр рядами (горизонтальные карусели)">
+              <span>≡ Ряды</span>
+            </button>
+            <button class="view-btn" id="btnViewCanvas" onclick="setViewMode('canvas')" title="Бесконечное полотно (сетка фильмов)">
+              <span>☷ Полотно</span>
+            </button>
+          </div>
         </div>
       </div>
 
       <!-- NETFLIX ROWS / CAROUSELS -->
       <section class="netflix-rows-container" id="rowsContainer">
         <!-- Rendered dynamically by app.js -->
+      </section>
+
+      <!-- INFINITE CANVAS / GRID (ПОЛОТНО) -->
+      <section class="netflix-canvas-grid" id="canvasContainer" style="display: none;">
+        <!-- Rendered dynamically when in canvas mode -->
       </section>
 
     </div>

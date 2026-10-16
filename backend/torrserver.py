@@ -32,7 +32,7 @@ def get_physical_net_info() -> Tuple[str, str, Optional[str]]:
                 return iface, ip, gw
     except Exception as e:
         print(f"Error detecting physical network: {e}")
-def parse_series_episodes(video_files: List[Dict[str, Any]]) -> Dict[str, Any]:
+def parse_series_episodes(video_files: List[Dict[str, Any]], default_season: int = 1) -> Dict[str, Any]:
     """
     Groups torrent video files by season and episode like Netflix.
     """
@@ -42,7 +42,7 @@ def parse_series_episodes(video_files: List[Dict[str, Any]]) -> Dict[str, Any]:
         name = path.split("/")[-1]
         
         # Season detection: Season 1, Сезон 1, S01, 1x
-        s_num = 1
+        s_num = default_season
         s_m = re.search(r'(?:season|сезон|s)[\s._-]*0*(\d+)', path, re.IGNORECASE)
         if not s_m:
             s_m = re.search(r'(\d+)x\d+', path, re.IGNORECASE)
@@ -362,7 +362,9 @@ class TorrServerManager:
 
             seasons_dict = {}
             if is_series:
-                seasons_dict = parse_series_episodes(video_files)
+                from backend.metadata import extract_season_info
+                _, s_start, _, _ = extract_season_info(title)
+                seasons_dict = parse_series_episodes(video_files, default_season=s_start or 1)
                 enriched_video_files = []
                 for s_k in sorted(seasons_dict.keys(), key=lambda x: int(x)):
                     enriched_video_files.extend(seasons_dict[s_k])

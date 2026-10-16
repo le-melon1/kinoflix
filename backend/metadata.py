@@ -33,6 +33,34 @@ def extract_movie_names(torrent_title: str) -> Dict[str, Optional[str]]:
 
     return {"ru_title": torrent_title.split('/')[0].strip(), "en_title": None, "year": None}
 
+def extract_season_info(title: str):
+    """
+    Extracts season label (e.g. 'Сезон 2', 'Сезоны 1–2') and start/end season numbers from torrent title.
+    Returns: (label, start_season, end_season, is_multi)
+    """
+    # Multi-season range like S01-02, S01-S04, 1-4 сезон, 1-2 сезоны
+    m_range = re.search(r'(?:s0*(\d{1,2})\s*[-–]\s*s?0*(\d{1,2})|0*(\d{1,2})\s*[-–]\s*0*(\d{1,2})\s*(?:сезон|сезоны|season|seasons))', title, re.IGNORECASE)
+    if m_range:
+        nums = [int(x) for x in m_range.groups() if x is not None]
+        if len(nums) >= 2:
+            return f"Сезоны {nums[0]}–{nums[1]}", nums[0], nums[1], True
+
+    # Single season like S02, 02x01, Сезон 3, 1 сезон (bounds: 1-99)
+    m_single = re.search(r'(?:s0*(\d{1,2})|\b0*(\d{1,2})x\d+|\bсезон\s*0*(\d{1,2})|\b0*(\d{1,2})\s*сезон)', title, re.IGNORECASE)
+    if m_single:
+        nums = [int(x) for x in m_single.groups() if x is not None and 1 <= int(x) <= 99]
+        if nums:
+            return f"Сезон {nums[0]}", nums[0], nums[0], False
+
+    return None, None, None, False
+
+def extract_torrent_year(title: str) -> Optional[str]:
+    """
+    Extracts release year or year range like (2024) or (2021-2024) from torrent title.
+    """
+    m = re.search(r'\((\d{4}(?:\s*[-–]\s*\d{4})?)\)', title)
+    return m.group(1).strip() if m else None
+
 async def fetch_movie_metadata(query: str, results: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
     """
     Fetch poster, rating, year, genre, and plot for a movie or show.
@@ -241,20 +269,34 @@ async def enrich_search_results(results: List[Dict[str, Any]]) -> List[Dict[str,
 
     # Apply lookups to results
     for item in results:
-        parsed = extract_movie_names(item.get("title", ""))
+        t_raw = item.get("title", "")
+        parsed = extract_movie_names(t_raw)
         query_key = (parsed.get("en_title") or parsed.get("ru_title") or "").strip().lower()
         meta = lookup_map.get(query_key)
+
+        s_label, s_start, s_end, is_multi = extract_season_info(t_raw)
+        t_year = extract_torrent_year(t_raw)
+        base_title = meta["display_title"] if meta else (parsed.get("ru_title") or item.get("title"))
+
+        item["season_label"] = s_label
+        item["season_start"] = s_start
+        item["season_end"] = s_end
+        item["is_multi_season"] = is_multi
+
+        if s_label:
+            item["display_title"] = f"{base_title} • {s_label}"
+            item["display_year"] = t_year or (meta["display_year"] if meta else "2024")
+            item["is_series"] = True
+        else:
+            item["display_title"] = base_title
+            item["display_year"] = t_year or (meta["display_year"] if meta else (parsed.get("year") or "2024"))
+            item["is_series"] = (meta.get("media_type") == "tv") if meta else False
+
         if meta:
-            item["display_title"] = meta["display_title"]
-            item["display_year"] = meta["display_year"]
             item["poster"] = meta["poster"]
             item["backdrop"] = meta["backdrop"]
             item["rating"] = meta["rating"]
             item["overview"] = meta["overview"]
-            item["is_series"] = meta.get("media_type") == "tv"
-        else:
-            item["display_title"] = parsed.get("ru_title") or item.get("title")
-            item["display_year"] = parsed.get("year") or "2024"
 
     return results
 
@@ -389,6 +431,84 @@ def curate_verified_editions(results: List[Dict[str, Any]], min_seeds: int = 3) 
         item_copy["health_color"] = health_color
         return item_copy
 
+    is_series_search = any(r.get("season_label") or r.get("is_series") for r in healthy)
+
+    if is_series_search:
+        # 1. Look for multi-season complete pack (e.g. S01-02, S01-04)
+        multi_pack = None
+        for r in healthy:
+            if r.get("is_multi_season"):
+                if not multi_pack or r.get("seeds", 0) > multi_pack.get("seeds", 0):
+                    multi_pack = r
+
+        if multi_pack and multi_pack["id"] not in used_ids:
+            verified.append(make_curated(
+                multi_pack,
+                badge=f"⭐ ВСЕ СЕЗОНЫ ({multi_pack.get('seeds', 0)} сидов)",
+                category_name=f"{multi_pack.get('season_label', 'Все сезоны')} (Полный пак)",
+                desc=f"Все сезоны и серии в одной раздаче. Удобный выбор серий любого сезона.",
+                stars=9.9
+            ))
+            used_ids.add(multi_pack["id"])
+
+        # 2. Look for Latest Season (e.g. Season 2 for Arcane, Season 4 for The Boys)
+        max_s = max([r.get("season_end") or 1 for r in healthy if r.get("season_end")], default=1)
+        if max_s > 1:
+            latest_rel = None
+            for r in healthy:
+                if r["id"] in used_ids:
+                    continue
+                if r.get("season_end") == max_s and not r.get("is_multi_season"):
+                    if not latest_rel or r.get("seeds", 0) > latest_rel.get("seeds", 0):
+                        latest_rel = r
+
+            if latest_rel and latest_rel["id"] not in used_ids:
+                s_lbl = latest_rel.get("season_label", f"Сезон {max_s}")
+                yr_lbl = latest_rel.get("display_year", "2024")
+                verified.append(make_curated(
+                    latest_rel,
+                    badge=f"🔥 {s_lbl.upper()} ({latest_rel.get('seeds', 0)} сидов) • Новинка",
+                    category_name=f"{s_lbl} ({yr_lbl})",
+                    desc=f"Самый свежий сезон в высоком качестве Full HD с русской озвучкой.",
+                    stars=9.8
+                ))
+                used_ids.add(latest_rel["id"])
+
+        # 3. Look for Season 1 (Start of the story)
+        s1_rel = None
+        for r in healthy:
+            if r["id"] in used_ids:
+                continue
+            if r.get("season_start") == 1 and not r.get("is_multi_season"):
+                if not s1_rel or r.get("seeds", 0) > s1_rel.get("seeds", 0):
+                    s1_rel = r
+
+        if s1_rel and s1_rel["id"] not in used_ids:
+            verified.append(make_curated(
+                s1_rel,
+                badge=f"💎 СЕЗОН 1 ({s1_rel.get('seeds', 0)} сидов)",
+                category_name="Сезон 1 (Full HD 1080p)",
+                desc=f"Первый сезон в эталонном качестве Full HD 1080p.",
+                stars=9.7
+            ))
+            used_ids.add(s1_rel["id"])
+
+        # 4. Fill up to 4 with other top releases (alternative dubbing / 4K / popular releases)
+        for r in healthy:
+            if r["id"] not in used_ids and len(verified) < 4:
+                lbl = r.get("season_label") or r.get("quality", "HD")
+                verified.append(make_curated(
+                    r,
+                    badge=f"⚡ {lbl.upper()} ({r.get('seeds', 0)} сидов)",
+                    category_name=r.get("display_title", r["title"]),
+                    desc=f"Озвучка: {r.get('audio', 'Русский звук')} • Размер: {r.get('size')}",
+                    stars=9.5
+                ))
+                used_ids.add(r["id"])
+
+        return verified
+
+    # Fallback to standard movie curation:
     # 1. Look for best 1080p BDRip with Dubbing and high seeds (Optimal default for web player)
     best_1080p = None
     for r in healthy:

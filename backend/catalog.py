@@ -1143,7 +1143,22 @@ async def get_more_category_movies(category_id: str, page: int = 1) -> List[Dict
         'trending': ('trending', ''),
     }
 
-    mtype, params = genre_map.get(category_id, ('movie', 'sort_by=popularity.desc'))
+    cat_key = category_id.lower()
+    if cat_key == 'all':
+        mtype, params = ('trending', '')
+    elif cat_key in ('movies', 'all_movies'):
+        mtype, params = ('movie', 'sort_by=popularity.desc')
+    elif 'series' in cat_key:
+        mtype, params = ('tv', 'sort_by=popularity.desc&vote_count.gte=100&without_genres=10767,10763')
+    elif cat_key in genre_map:
+        mtype, params = genre_map[cat_key]
+    else:
+        matched = next((genre_map[g] for g in genre_map if g in cat_key), None)
+        if matched:
+            mtype, params = matched
+        else:
+            mtype, params = ('movie', 'sort_by=popularity.desc')
+
     tmdb_key = '1cf50e6248dc270629e802686245c2c8'
     if mtype == 'trending':
         url = f'https://api.themoviedb.org/3/trending/all/week?api_key={tmdb_key}&language=ru-RU&page={page}'
