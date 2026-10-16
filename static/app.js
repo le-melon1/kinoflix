@@ -212,6 +212,9 @@ function getEffectiveDuration() {
 
 function getEffectiveCurrentTime() {
   const vidCur = (netflixVideo && !isNaN(netflixVideo.currentTime)) ? netflixVideo.currentTime : 0;
+  if (state.audioMode === 'direct') {
+    return vidCur;
+  }
   return (state.currentSeekOffset || 0) + vidCur;
 }
 
@@ -1697,11 +1700,18 @@ async function startNetflixStream(item, episodeFileId = null, initialSeekTime = 
     }
 
     // Set duration from episode/torrent/catalog metadata
-    state.currentSeekOffset = initialSeekTime || 0;
     state.mediaDuration = (activeFile && activeFile.duration_seconds) || data.duration || item.duration_seconds || state.activeMovie?.duration_seconds || 5400;
+    
+    if (state.audioMode === 'aac') {
+      state.currentSeekOffset = initialSeekTime || 0;
+    } else {
+      state.currentSeekOffset = 0;
+    }
+
+    const effectiveCurTime = initialSeekTime || 0;
     playerDuration.textContent = formatTime(state.mediaDuration);
-    playerCurrentTime.textContent = formatTime(state.currentSeekOffset);
-    const initialPercent = (state.mediaDuration > 0 && state.currentSeekOffset > 0) ? (state.currentSeekOffset / state.mediaDuration) * 100 : 0;
+    playerCurrentTime.textContent = formatTime(effectiveCurTime);
+    const initialPercent = (state.mediaDuration > 0 && effectiveCurTime > 0) ? (effectiveCurTime / state.mediaDuration) * 100 : 0;
     playerProgressPlayed.style.width = `${initialPercent}%`;
     playerScrubberHandle.style.left = `${initialPercent}%`;
 
@@ -1717,9 +1727,12 @@ async function startNetflixStream(item, episodeFileId = null, initialSeekTime = 
         try { netflixVideo.currentTime = initialSeekTime; } catch (_) {}
       }
       const seekOnce = () => {
-        try { netflixVideo.currentTime = initialSeekTime; } catch (_) {}
+        if (state.audioMode === 'direct') {
+          try { netflixVideo.currentTime = initialSeekTime; } catch (_) {}
+        }
       };
       netflixVideo.addEventListener('loadedmetadata', seekOnce, { once: true });
+      netflixVideo.addEventListener('canplay', seekOnce, { once: true });
     }
     netflixVideo.play().catch(e => console.log('Autoplay deferred:', e));
 
@@ -2100,12 +2113,12 @@ function switchDubbingRelease(idx) {
     return;
   }
 
-  const curTime = Math.floor(getEffectiveCurrentTime());
+  const curTime = Math.max(0, Math.floor(getEffectiveCurrentTime()));
   if (playerAudioMenu) playerAudioMenu.style.display = 'none';
   if (playerReleaseDrawer) playerReleaseDrawer.style.display = 'none';
 
   playerSpinner.style.display = 'flex';
-  spinnerText.textContent = `Переключение на раздачу «${opt.studio || opt.display_name}»...`;
+  spinnerText.textContent = `Переключение на «${opt.studio || opt.display_name}» (${formatTime(curTime)})...`;
 
   const curEp = (state.videoFiles && state.videoFiles.length > 1) ? state.videoFiles.find(f => f.id === state.activeFileIndex) : null;
 
@@ -2627,6 +2640,11 @@ function setupKeyboardShortcuts() {
         case 'm':
           e.preventDefault();
           toggleMute();
+          break;
+        case 'r':
+        case 'к':
+          e.preventDefault();
+          togglePlayerReleaseDrawer();
           break;
         case 'arrowleft':
         case 'j':

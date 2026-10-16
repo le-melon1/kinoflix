@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="referrer" content="no-referrer">
   <title>Netflix — Смотрите фильмы и сериалы онлайн</title>
-  <link rel="stylesheet" href="style.css?v=2.7">
+  <link rel="stylesheet" href="style.css?v=2.8">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -366,9 +366,9 @@
             <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
           </svg>
         </button>
-        <div class="player-title-info">
+        <div class="player-title-info" style="cursor: pointer;" onclick="togglePlayerReleaseDrawer()" title="Сменить раздачу / качество (Клавиша R)">
           <div class="player-main-title" id="playerTitle">Название</div>
-          <div class="player-sub-title" id="playerSubtitle">4K UHD • Лицензионный дубляж</div>
+          <div class="player-sub-title" id="playerSubtitle">4K UHD • Лицензионный дубляж <span style="font-size:0.75rem; color:#46d369; margin-left:6px; font-weight:700;">[Сменить раздачу ↻]</span></div>
         </div>
       </div>
 
@@ -466,6 +466,14 @@
               <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
                 <path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/>
               </svg>
+            </button>
+
+            <!-- Fast Release / Dubbing Switcher -->
+            <button class="n-btn" id="playerReleasesBtn" onclick="togglePlayerReleaseDrawer()" title="Сменить раздачу / качество с сохранением времени (r)" style="display: flex; align-items: center; gap: 5px; padding: 4px 10px;">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+              </svg>
+              <span style="font-size: 0.78rem; font-weight: 700; letter-spacing: 0.2px;">Раздачи</span>
             </button>
 
             <!-- Audio Tracks & Sound Mode -->
@@ -722,6 +730,6 @@
   <!-- Toast Notification Container -->
   <div id="toastContainer" style="position: fixed; top: 24px; right: 24px; z-index: 999999; display: flex; flex-direction: column; gap: 10px; pointer-events: none;"></div>
 
-  <script src="app.js?v=2.7"></script>
+  <script src="app.js?v=2.8"></script>
 </body>
 </html>
