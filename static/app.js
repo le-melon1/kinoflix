@@ -501,6 +501,76 @@ function goHome() {
   searchBox.classList.remove('open');
 }
 
+// --- TOAST NOTIFICATIONS ---
+function showToast(msg, type = 'info') {
+  let container = document.getElementById('toastContainer');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toastContainer';
+    container.style.cssText = 'position:fixed; top:24px; right:24px; z-index:999999; display:flex; flex-direction:column; gap:10px; pointer-events:none;';
+    document.body.appendChild(container);
+  }
+  const el = document.createElement('div');
+  const isErr = type === 'error';
+  const borderCol = isErr ? '#e50914' : '#46d369';
+  el.style.cssText = `background:rgba(20,20,20,0.95); border-left:4px solid ${borderCol}; color:#fff; padding:12px 20px; border-radius:6px; font-size:0.95rem; font-weight:600; box-shadow:0 8px 24px rgba(0,0,0,0.6); pointer-events:auto; transition:all 0.3s ease; opacity:0; transform:translateX(30px); max-width:380px; backdrop-filter:blur(10px);`;
+  el.textContent = msg;
+  container.appendChild(el);
+  requestAnimationFrame(() => {
+    el.style.opacity = '1';
+    el.style.transform = 'translateX(0)';
+  });
+  setTimeout(() => {
+    el.style.opacity = '0';
+    el.style.transform = 'translateX(30px)';
+    setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 350);
+  }, 4000);
+}
+
+// --- PERSISTENT DOWNLOAD MANAGER FRONTEND ---
+let _downloadsPollTimer = null;
+
+function startDownloadsPolling() {
+  if (_downloadsPollTimer) return;
+  _downloadsPollTimer = setInterval(pollDownloadsStatus, 1500);
+  pollDownloadsStatus();
+}
+
+function stopDownloadsPolling() {
+  if (_downloadsPollTimer) {
+    clearInterval(_downloadsPollTimer);
+    _downloadsPollTimer = null;
+  }
+}
+
+async function pollDownloadsStatus() {
+  const isDlViewOpen = downloadsView && downloadsView.style.display !== 'none';
+  const isModalOpen = movieDetailModal && movieDetailModal.style.display === 'flex';
+  const isTvDl = state.tvMode && state.tvCategory === 'downloads';
+
+  if (!isDlViewOpen && !isModalOpen && !isTvDl) {
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/downloads/list');
+    if (!res.ok) return;
+    const data = await res.json();
+
+    if (isDlViewOpen) {
+      renderDownloadsView(data);
+    }
+    if (isModalOpen) {
+      updateModalDownloadStatus(data);
+    }
+    if (isTvDl) {
+      renderTvDownloadsFromData(data);
+    }
+  } catch (e) {
+    console.error('Downloads poll error:', e);
+  }
+}
+
 async function openDownloadsView() {
   document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
   const dlNav = document.getElementById('navDownloads');
@@ -511,60 +581,131 @@ async function openDownloadsView() {
   if (tvView) tvView.style.display = 'none';
   downloadsView.style.display = 'block';
 
+  startDownloadsPolling();
   await loadDownloadsList();
 }
 
 async function loadDownloadsList() {
   if (!downloadsGrid) return;
-  downloadsGrid.innerHTML = `
-    <div style="grid-column: 1/-1; padding: 40px; text-align: center; color: #888;">
-      <div class="netflix-spinner-circle" style="width:36px; height:36px; margin:0 auto 10px;"></div>
-      Загрузка списка скачанных файлов...
-    </div>
-  `;
   try {
     const res = await fetch('/api/downloads/list');
     const data = await res.json();
-    const items = data.items || [];
-    if (!items.length) {
-      downloadsGrid.innerHTML = `
-        <div style="grid-column: 1/-1; padding: 50px 20px; text-align: center; color: #777;">
-          <div style="font-size: 3rem; margin-bottom: 12px;">📂</div>
-          <h3 style="color:#aaa; font-size:1.2rem; margin-bottom:8px;">Папка пока пуста</h3>
-          <p style="font-size:0.95rem; max-width:500px; margin:0 auto 20px;">
-            Вы можете скачать любой фильм или серию на диск, нажав кнопку <strong>«💾 Скачать на диск»</strong> в карточке фильма.
-          </p>
-          <button class="n-secondary-btn" onclick="openDownloadsFinder()" style="background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); color:#fff; padding:8px 18px; border-radius:4px; cursor:pointer;">
-            Открыть папку в Finder
+    renderDownloadsView(data);
+  } catch (err) {
+    downloadsGrid.innerHTML = `<div style="grid-column: 1/-1; color: #ff6b6b; padding: 20px;">Ошибка загрузки списка: ${err.message}</div>`;
+  }
+}
+
+function renderDownloadsView(data) {
+  if (!downloadsGrid) return;
+  const active = data.active || [];
+  const completed = data.items || [];
+
+  if (!active.length && !completed.length) {
+    downloadsGrid.innerHTML = `
+      <div style="grid-column: 1/-1; padding: 50px 20px; text-align: center; color: #777;">
+        <div style="font-size: 3rem; margin-bottom: 12px;">📂</div>
+        <h3 style="color:#aaa; font-size:1.2rem; margin-bottom:8px;">Папка загрузок пока пуста</h3>
+        <p style="font-size:0.95rem; max-width:500px; margin:0 auto 20px;">
+          Вы можете скачать любой фильм или сериал на диск, нажав кнопку <strong>«💾 Скачать на диск»</strong> в карточке фильма. Загрузка продолжится непрерывно даже в фоновом режиме.
+        </p>
+        <button class="n-secondary-btn" onclick="openDownloadsFinder()" style="background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); color:#fff; padding:8px 18px; border-radius:4px; cursor:pointer;">
+          Открыть папку в Finder
+        </button>
+      </div>
+    `;
+    return;
+  }
+
+  let html = '';
+
+  // 1. Active downloading cards
+  if (active.length) {
+    html += `
+      <div style="grid-column: 1/-1; margin-bottom: 8px;">
+        <h2 style="font-size: 1.2rem; font-weight: 800; color: #fff; display: flex; align-items: center; gap: 8px;">
+          <span>⏳</span> Скачиваются прямо сейчас (${active.length})
+        </h2>
+      </div>
+    `;
+    html += active.map(it => `
+      <div class="download-card" style="border: 1px solid rgba(229,9,20,0.5); background: linear-gradient(180deg, #241113 0%, #181818 100%); border-radius: 8px; padding: 16px;">
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+            <div class="download-card-title" style="margin: 0; font-size: 1.05rem; font-weight: 700;">${escapeHtml(it.title)}</div>
+            <span style="color: #46d369; font-weight: 800; font-size: 1rem; margin-left: 8px;">${it.progress}%</span>
+          </div>
+
+          <!-- Progress Bar -->
+          <div style="width: 100%; height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; overflow: hidden; margin: 10px 0 8px;">
+            <div style="width: ${it.progress}%; height: 100%; background: #e50914; border-radius: 4px; transition: width 0.3s ease;"></div>
+          </div>
+
+          <div class="download-card-meta" style="display: flex; justify-content: space-between; font-size: 0.82rem; color: #bbb; margin-bottom: 14px;">
+            <span>⚡ ${it.speed_str}</span>
+            <span>💾 ${it.downloaded_str} из ${it.total_str}</span>
+            <span>⏳ ${it.eta_str ? `Осталось: ${it.eta_str}` : 'Расчёт...'}</span>
+          </div>
+        </div>
+
+        <div class="download-card-actions">
+          <button class="n-secondary-btn" onclick="cancelActiveDownload('${escapeJs(it.filename)}')" style="width: 100%; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.25); color: #fff; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">
+            ✕ Отменить загрузку
           </button>
         </div>
-      `;
-      return;
-    }
+      </div>
+    `).join('');
+  }
 
-    downloadsGrid.innerHTML = items.map(it => `
-      <div class="download-card">
+  // 2. Completed downloads cards
+  if (completed.length) {
+    if (active.length) {
+      html += `
+        <div style="grid-column: 1/-1; margin: 24px 0 8px;">
+          <h2 style="font-size: 1.2rem; font-weight: 800; color: #fff; display: flex; align-items: center; gap: 8px;">
+            <span>✔</span> Скачанные фильмы и сериалы (${completed.length})
+          </h2>
+        </div>
+      `;
+    }
+    html += completed.map(it => `
+      <div class="download-card" style="border: 1px solid rgba(255,255,255,0.12); background: #1a1a1a; border-radius: 8px; padding: 16px;">
         <div>
-          <div class="download-card-title">${escapeHtml(it.title)}</div>
-          <div class="download-card-meta">
+          <div class="download-card-title" style="font-size: 1.05rem; font-weight: 700; margin-bottom: 6px;">${escapeHtml(it.title)}</div>
+          <div class="download-card-meta" style="margin-bottom: 14px;">
             <span>💾 ${it.size_str}</span>
-            <span style="margin-left: 10px; color: ${it.is_complete ? '#46d369' : '#e5a00d'};">
-              ${it.is_complete ? '✔ Скачан' : '⏳ Загрузка...'}
+            <span style="margin-left: 10px; color: #46d369; font-weight: 700;">
+              ✔ Полностью скачан
             </span>
           </div>
         </div>
-        <div class="download-card-actions">
-          <button class="n-edition-play-btn" onclick="playLocalDownload('${escapeJs(it.filename)}', '${escapeJs(it.title)}')" style="flex: 2;">
-            ▶ Смотреть
+        <div class="download-card-actions" style="display: flex; gap: 8px;">
+          <button class="n-edition-play-btn" onclick="playLocalDownload('${escapeJs(it.filename)}', '${escapeJs(it.title)}')" style="flex: 2; padding: 8px 16px; border-radius: 4px;">
+            ▶ Смотреть без интернета
           </button>
-          <button class="n-secondary-btn" onclick="deleteDownloadedFile('${escapeJs(it.filename)}')" style="background: rgba(229,9,20,0.2); border: 1px solid rgba(229,9,20,0.4); color: #ff6b6b; padding: 6px 12px; border-radius: 4px; cursor: pointer;">
+          <button class="n-secondary-btn" onclick="deleteDownloadedFile('${escapeJs(it.filename)}')" style="background: rgba(229,9,20,0.2); border: 1px solid rgba(229,9,20,0.4); color: #ff6b6b; padding: 8px 14px; border-radius: 4px; cursor: pointer;" title="Удалить файл">
             🗑
           </button>
         </div>
       </div>
     `).join('');
-  } catch (err) {
-    downloadsGrid.innerHTML = `<div style="grid-column: 1/-1; color: #ff6b6b; padding: 20px;">Ошибка загрузки: ${err.message}</div>`;
+  }
+
+  downloadsGrid.innerHTML = html;
+}
+
+async function cancelActiveDownload(filename) {
+  if (!confirm(`Отменить скачивание "${filename}"?`)) return;
+  try {
+    await fetch('/api/downloads/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename })
+    });
+    showToast(`Загрузка «${filename}» отменена`);
+    await loadDownloadsList();
+  } catch (e) {
+    showToast('Ошибка отмены: ' + e.message, 'error');
   }
 }
 
@@ -580,9 +721,10 @@ async function deleteDownloadedFile(filename) {
   if (!confirm(`Удалить файл "${filename}" с диска?`)) return;
   try {
     await fetch(`/api/downloads/${encodeURIComponent(filename)}`, { method: 'DELETE' });
-    loadDownloadsList();
+    showToast(`Файл «${filename}» удалён`);
+    await loadDownloadsList();
   } catch (e) {
-    alert('Ошибка удаления: ' + e.message);
+    showToast('Ошибка удаления: ' + e.message, 'error');
   }
 }
 
@@ -598,31 +740,127 @@ function playLocalDownload(filename, title) {
 
 async function saveActiveMovieToDisk() {
   const btn = document.getElementById('modalSaveDownloadBtn');
-  if (btn) btn.innerHTML = '⏳ Добавление...';
+  const box = document.getElementById('modalDownloadProgressBox');
+  if (btn) btn.innerHTML = '⏳ Подключение...';
 
   try {
-    const torrentHash = state.modalTorrentData?.hash || state.activeTorrentHash;
-    const fileId = state.modalTorrentData?.default_index || 1;
     const rawTitle = state.activeMovie?.title || 'movie';
-    const filename = `${rawTitle.replace(/[/\\?%*:|"<>]/g, '_')}.mp4`;
+    const poster = state.activeMovie?.backdrop || state.activeMovie?.poster || '';
+    const safeTitle = rawTitle.replace(/[/\\?%*:|"<>]/g, '_');
+    const filename = `${safeTitle}.mp4`;
+
+    const torrentItem = state.modalTorrentItem || (state.modalVerified && state.modalVerified[0]) || (state.modalAllResults && state.modalAllResults[0]);
+    const torrentHash = state.modalTorrentData?.hash || state.preloadedStreamData?.hash || torrentItem?.hash || state.activeTorrentHash || null;
+    const fileId = state.modalTorrentData?.default_index || state.preloadedStreamData?.default_index || 1;
+
+    const payload = {
+      torrent_hash: torrentHash,
+      file_id: fileId,
+      filename: filename,
+      title: rawTitle,
+      poster: poster,
+      magnet: torrentItem?.magnet || null,
+      topic_id: torrentItem?.topic_id || null
+    };
 
     const res = await fetch('/api/downloads/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        torrent_hash: torrentHash,
-        file_id: fileId,
-        filename: filename,
-        title: rawTitle
-      })
+      body: JSON.stringify(payload)
     });
-    if (btn) btn.innerHTML = '✔ Загрузка начата';
-    setTimeout(() => { if (btn) btn.innerHTML = '💾 Скачать на диск'; }, 3000);
-    alert(`Фильм "${rawTitle}" добавлен в загрузки (~/Downloads/KinoFlix)! Вы можете найти его во вкладке «Загрузки».`);
+    const data = await res.json();
+    if (res.ok) {
+      if (btn) btn.innerHTML = '⏬ Загрузка...';
+      if (box) box.style.display = 'block';
+      showToast(`✔ «${rawTitle}» добавлен в загрузки!`);
+      startDownloadsPolling();
+    } else {
+      throw new Error(data.detail || data.message || 'Ошибка запуска');
+    }
   } catch (err) {
     if (btn) btn.innerHTML = '💾 Скачать на диск';
-    alert('Ошибка скачивания: ' + err.message);
+    showToast('Ошибка скачивания: ' + err.message, 'error');
   }
+}
+
+async function checkActiveMovieDownloadStatus() {
+  const rawTitle = state.activeMovie?.title;
+  if (!rawTitle) return;
+
+  try {
+    const res = await fetch('/api/downloads/list');
+    if (!res.ok) return;
+    const data = await res.json();
+    updateModalDownloadStatus(data);
+  } catch (e) {
+    console.error('Check download status error:', e);
+  }
+}
+
+function updateModalDownloadStatus(data) {
+  if (!movieDetailModal || movieDetailModal.style.display !== 'flex') return;
+  const rawTitle = state.activeMovie?.title;
+  if (!rawTitle) return;
+
+  const btn = document.getElementById('modalSaveDownloadBtn');
+  const box = document.getElementById('modalDownloadProgressBox');
+  const percentEl = document.getElementById('modalDlPercent');
+  const barEl = document.getElementById('modalDlBar');
+  const speedEl = document.getElementById('modalDlSpeed');
+  const sizesEl = document.getElementById('modalDlSizes');
+  const etaEl = document.getElementById('modalDlEta');
+  const statusText = document.getElementById('modalDlStatusText');
+
+  const rLow = rawTitle.toLowerCase();
+
+  // 1. Is it currently downloading?
+  const active = (data.active || []).find(d => (d.title && d.title.toLowerCase() === rLow) || (d.filename && d.filename.toLowerCase().includes(rLow)));
+  if (active) {
+    if (btn) {
+      btn.innerHTML = `⏬ ${active.progress}%`;
+      btn.onclick = openDownloadsView;
+    }
+    if (box) box.style.display = 'block';
+    if (percentEl) percentEl.textContent = `${active.progress}%`;
+    if (barEl) {
+      barEl.style.width = `${active.progress}%`;
+      barEl.style.background = '#e50914';
+    }
+    if (speedEl) speedEl.textContent = `⚡ ${active.speed_str}`;
+    if (sizesEl) sizesEl.textContent = `${active.downloaded_str} / ${active.total_str}`;
+    if (etaEl) etaEl.textContent = active.eta_str ? `⏳ Осталось: ${active.eta_str}` : '⏳ Расчёт...';
+    if (statusText) statusText.innerHTML = `<span class="netflix-spinner-circle" style="width:14px; height:14px; border-width:2px; display:inline-block;"></span> Скачивание на диск...`;
+    return;
+  }
+
+  // 2. Is it completed on disk?
+  const completed = (data.items || []).find(d => (d.title && d.title.toLowerCase() === rLow) || (d.filename && d.filename.toLowerCase().includes(rLow)));
+  if (completed) {
+    if (btn) {
+      btn.innerHTML = '✔ Скачан (Смотреть)';
+      btn.onclick = () => playLocalDownload(completed.filename, completed.title);
+    }
+    if (box) {
+      box.style.display = 'block';
+      if (percentEl) percentEl.textContent = '100%';
+      if (barEl) {
+        barEl.style.width = '100%';
+        barEl.style.background = '#46d369';
+      }
+      if (speedEl) speedEl.textContent = '✔ Готов к просмотру';
+      if (sizesEl) sizesEl.textContent = completed.size_str;
+      if (etaEl) etaEl.textContent = 'Локальный файл';
+      if (statusText) statusText.innerHTML = '✔ Фильм полностью скачан на диск';
+    }
+    return;
+  }
+
+  // 3. Not downloading and not downloaded
+  if (btn) {
+    btn.innerHTML = '💾 Скачать на диск';
+    btn.onclick = saveActiveMovieToDisk;
+  }
+  if (box) box.style.display = 'none';
 }
 
 function setViewMode(mode) {
@@ -910,6 +1148,8 @@ async function openMovieDetails(movie) {
   modalEpisodesSection.style.display = 'none';
   modalEditionsList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">Загрузка проверенных раздач с RuTracker...</div>';
   movieDetailModal.style.display = 'flex';
+  checkActiveMovieDownloadStatus();
+  startDownloadsPolling();
 
   // Search live torrents for this movie
   const q = movie.search_query || movie.title;
@@ -958,6 +1198,8 @@ function openMovieDetailsWithTorrents(movie, verified, allResults) {
 
   modalEpisodesSection.style.display = 'none';
   movieDetailModal.style.display = 'flex';
+  checkActiveMovieDownloadStatus();
+  startDownloadsPolling();
   renderModalEditions(verified, allResults);
 
   const top = (verified && (verified.find(r => r.is_multi_season) || verified[0])) || (allResults && allResults[0]);
@@ -1279,6 +1521,9 @@ function playSelectedMovie() {
 
 function closeDetailModal() {
   movieDetailModal.style.display = 'none';
+  if (downloadsView && downloadsView.style.display === 'none') {
+    stopDownloadsPolling();
+  }
 }
 
 function closeModalOnBackdrop(e) {
@@ -2789,24 +3034,44 @@ function refreshTvItems() {
   renderTvCards();
 }
 
+function renderTvDownloadsFromData(data) {
+  if (!state.tvMode || state.tvCategory !== 'downloads') return;
+  const activeCards = (data.active || []).map(d => ({
+    id: d.filename,
+    title: `⏳ [${d.progress}%] ${d.title}`,
+    is_download: false,
+    is_active_download: true,
+    size: `${d.downloaded_str} / ${d.total_str}`,
+    filename: d.filename,
+    poster: d.poster || 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=600&q=80',
+    backdrop: d.poster || 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1280&q=80',
+    quality: `${d.progress}%`,
+    rating: d.speed_str,
+    match: d.eta_str || 'Загрузка'
+  }));
+  const completedCards = (data.items || []).map(d => ({
+    id: d.filename,
+    title: d.title,
+    is_download: true,
+    size: d.size_str,
+    filename: d.filename,
+    stream_url: d.stream_url,
+    poster: d.poster || 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=600&q=80',
+    backdrop: d.poster || 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1280&q=80',
+    quality: 'HD',
+    rating: '10',
+    match: '100%'
+  }));
+  state.tvItems = [...activeCards, ...completedCards];
+  renderTvCards();
+}
+
 async function loadTvDownloads() {
+  startDownloadsPolling();
   try {
     const res = await fetch('/api/downloads/list');
     const data = await res.json();
-    state.tvItems = (data.items || []).map(d => ({
-      id: d.filename,
-      title: d.title,
-      is_download: true,
-      size: d.size_str,
-      filename: d.filename,
-      stream_url: d.stream_url,
-      poster: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=600&q=80',
-      backdrop: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1280&q=80',
-      quality: 'HD',
-      rating: '10',
-      match: '100%'
-    }));
-    renderTvCards();
+    renderTvDownloadsFromData(data);
   } catch (e) {
     state.tvItems = [];
     renderTvCards();

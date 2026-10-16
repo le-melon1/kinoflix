@@ -637,46 +637,20 @@ async def download_rutracker_torrent(topic_id: str):
         headers={"Content-Disposition": f'attachment; filename="rutracker_{topic_id}.torrent"'}
     )
 
-DOWNLOADS_DIR = os.path.expanduser("~/Downloads/KinoFlix")
-os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+from backend.download_manager import download_mgr, DOWNLOADS_DIR
 
 class DownloadStartRequest(BaseModel):
-    torrent_hash: str
+    torrent_hash: Optional[str] = None
     file_id: int = 1
-    filename: str
+    filename: Optional[str] = None
     title: Optional[str] = None
+    poster: Optional[str] = ""
+    magnet: Optional[str] = None
+    topic_id: Optional[int] = None
 
 @app.get("/api/downloads/list")
 async def list_downloads():
-    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-    items = []
-    try:
-        for fname in os.listdir(DOWNLOADS_DIR):
-            if fname.startswith("."):
-                continue
-            fpath = os.path.join(DOWNLOADS_DIR, fname)
-            if os.path.isfile(fpath):
-                st = os.stat(fpath)
-                size_mb = round(st.st_size / (1024 * 1024), 1)
-                size_str = f"{size_mb} МБ" if size_mb < 1024 else f"{round(size_mb / 1024, 2)} ГБ"
-                items.append({
-                    "filename": fname,
-                    "title": fname.rsplit(".", 1)[0],
-                    "size_mb": size_mb,
-                    "size_str": size_str,
-                    "path": fpath,
-                    "mtime": st.st_mtime,
-                    "stream_url": f"/api/downloads/play/{urllib.parse.quote(fname)}",
-                    "is_complete": not fname.endswith(".part")
-                })
-        items.sort(key=lambda x: x["mtime"], reverse=True)
-    except Exception as e:
-        print(f"Error listing downloads: {e}")
-
-    return {
-        "downloads_dir": DOWNLOADS_DIR,
-        "items": items
-    }
+    return download_mgr.get_status_payload()
 
 @app.post("/api/downloads/open-folder")
 async def open_downloads_folder():
@@ -689,44 +663,27 @@ async def open_downloads_folder():
 
 @app.post("/api/downloads/start")
 async def start_download(req: DownloadStartRequest):
-    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-    safe_name = re.sub(r'[\\/*?:"<>|]', "_", req.filename)
-    target_path = os.path.join(DOWNLOADS_DIR, safe_name)
+    res = await download_mgr.start_download(
+        torrent_hash=req.torrent_hash,
+        file_id=req.file_id,
+        filename=req.filename,
+        title=req.title,
+        poster=req.poster or "",
+        magnet=req.magnet,
+        topic_id=req.topic_id
+    )
+    return res
 
-    if os.path.exists(target_path) and os.path.getsize(target_path) > 1024 * 1024:
-        return {"status": "already_exists", "path": target_path, "filename": safe_name}
-
-    stream_src = f"http://127.0.0.1:8090/stream/{urllib.parse.quote(safe_name)}?link={req.torrent_hash}&index={req.file_id}&play"
-    part_path = target_path + ".part"
-
-    async def download_file_task():
-        try:
-            async with httpx.AsyncClient(timeout=None) as client:
-                async with client.stream("GET", stream_src) as resp:
-                    with open(part_path, "wb") as f:
-                        async for chunk in resp.aiter_bytes(chunk_size=256 * 1024):
-                            f.write(chunk)
-            if os.path.exists(part_path):
-                os.rename(part_path, target_path)
-        except Exception as e:
-            print(f"Background download error: {e}")
-
-    asyncio.create_task(download_file_task())
-    return {"status": "started", "path": target_path, "filename": safe_name}
+@app.post("/api/downloads/cancel")
+async def cancel_download_endpoint(payload: Dict[str, Any]):
+    fname = payload.get("filename") or payload.get("id") or ""
+    res = await download_mgr.cancel_download(fname)
+    return {"success": res}
 
 @app.delete("/api/downloads/{filename}")
 async def delete_download(filename: str):
-    safe_name = os.path.basename(filename)
-    target = os.path.join(DOWNLOADS_DIR, safe_name)
-    part = target + ".part"
-    deleted = False
-    if os.path.exists(target):
-        os.remove(target)
-        deleted = True
-    if os.path.exists(part):
-        os.remove(part)
-        deleted = True
-    return {"success": deleted}
+    res = await download_mgr.delete_download(filename)
+    return {"success": res}
 
 @app.get("/api/downloads/play/{filename}")
 async def play_downloaded(filename: str):
