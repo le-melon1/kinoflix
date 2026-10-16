@@ -217,6 +217,7 @@ class TorrServerManager:
         self.active_hash: Optional[str] = None
         self.download_limit_kb: int = 0
         self.upload_limit_kb: int = 50  # low upload by default to save user bandwidth
+        self.cache_size_mb: int = 256
         self.physical_iface: str = "en0"
         self.physical_ip: str = "127.0.0.1"
 
@@ -327,14 +328,17 @@ class TorrServerManager:
                 "udp://opentor.net:6969",
                 "http://retracker.local/announce"
             ])
+            cache_bytes = int(getattr(self, "cache_size_mb", 256)) * 1024 * 1024
+            down_limit = getattr(self, "download_limit_kb", 0)
+            up_limit = getattr(self, "upload_limit_kb", 50)
             settings = {
-                "CacheSize": 268435456,         # 256MB RAM cache (smooth 1080p/4K)
+                "CacheSize": cache_bytes,
                 "ReaderReadAHead": 95,
                 "PreloadCache": 25,
                 "UseDisk": False,              # Stream strictly in RAM
                 "ConnectionsLimit": 120,       # Up to 120 peer connections
-                "DownloadRateLimit": 0,        # Max speed
-                "UploadRateLimit": 0,          # Healthy seeding so swarm unchokes us
+                "DownloadRateLimit": down_limit,
+                "UploadRateLimit": up_limit,
                 "ForceEncrypt": False,
                 "ResponsiveMode": True,
                 "DisableUPNP": False,
@@ -352,6 +356,27 @@ class TorrServerManager:
             )
         except Exception as e:
             print(f"Warning: could not apply TorrServer settings immediately: {e}")
+
+    def set_cache_size(self, cache_mb: int):
+        """Dynamically update TorrServer RAM buffer size"""
+        self.cache_size_mb = int(cache_mb)
+        bytes_val = self.cache_size_mb * 1024 * 1024
+        try:
+            httpx.post(
+                f"{TORRSERVER_URL}/settings",
+                json={"action": "set", "sets": {"CacheSize": bytes_val}},
+                timeout=5.0
+            )
+        except Exception as e:
+            print(f"Warning: could not set TorrServer cache size: {e}")
+
+    def clear_cache(self) -> Dict[str, Any]:
+        """Drop all active torrents and clear internal probe cache"""
+        self.drop_all_torrents()
+        global _probe_cache
+        cleared_entries = len(_probe_cache)
+        _probe_cache.clear()
+        return {"status": "ok", "cleared_tracks_cache": cleared_entries}
 
     async def add_torrent(self, link: str, title: str = "Movie") -> Dict[str, Any]:
         """Add magnet link or torrent URL to TorrServer and return parsed info"""

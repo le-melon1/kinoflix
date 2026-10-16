@@ -382,17 +382,25 @@ def normalize_movie_query(query: str) -> List[str]:
     clean = query.strip()
     return [clean]
 
-def curate_verified_editions(results: List[Dict[str, Any]], min_seeds: int = 3) -> List[Dict[str, Any]]:
+def curate_verified_editions(
+    results: List[Dict[str, Any]],
+    min_seeds: int = 3,
+    preferred_quality: str = "4k",
+    preferred_audio: str = "Любая"
+) -> List[Dict[str, Any]]:
     """
     Curate and categorize releases into top verified editions with sufficient seeds:
     1. Ultra HD 4K (Best visuals)
     2. Optimal 1080p (Best balance of quality and streaming speed)
-    3. Fast Stream (Lightweight, instant play)
-    4. Best Dubbing / Alternative Sound (RHS, LostFilm, etc.)
     Filters out dead releases (seeds < min_seeds) so stream is guaranteed to start.
+    Respects user preferred quality (4k vs 1080p) and preferred dubbing studio.
     """
     if not results:
         return []
+
+    pref_audio_clean = preferred_audio.lower().replace("(rhs)", "").replace("(лицензия)", "").strip() if preferred_audio else ""
+    if pref_audio_clean == "любая":
+        pref_audio_clean = ""
 
     # Filter out dead releases completely
     healthy = [r for r in results if r.get("seeds", 0) >= min_seeds]
@@ -402,6 +410,13 @@ def curate_verified_editions(results: List[Dict[str, Any]], min_seeds: int = 3) 
     
     if not healthy:
         return []
+
+    # If user has a preferred audio studio, sort/prioritize releases matching it
+    if pref_audio_clean:
+        def audio_score(item):
+            t = (item.get("title", "") + " " + item.get("audio", "")).lower()
+            return 1 if pref_audio_clean in t else 0
+        healthy = sorted(healthy, key=lambda x: (audio_score(x), x.get("seeds", 0)), reverse=True)
 
     verified: List[Dict[str, Any]] = []
     used_ids = set()
@@ -529,25 +544,38 @@ def curate_verified_editions(results: List[Dict[str, Any]], min_seeds: int = 3) 
             if not best_1080p or r.get("seeds", 0) > best_1080p.get("seeds", 0):
                 best_1080p = r
 
+    card_4k = None
     if best_4k and best_4k.get("seeds", 0) >= 1:
-        verified.append(make_curated(
+        card_4k = make_curated(
             best_4k,
             badge=f"👑 4K ULTRA HD ({best_4k.get('seeds', 0)} сидов)",
             category_name="Максимальное качество (4K HDR)",
             desc="Высшая чёткость, расширенный динамический диапазон HDR10/Dolby Vision и многоканальный звук.",
             stars=9.9
-        ))
+        )
         used_ids.add(best_4k["id"])
 
+    card_1080p = None
     if best_1080p and best_1080p.get("seeds", 0) >= 1:
-        verified.append(make_curated(
+        card_1080p = make_curated(
             best_1080p,
             badge=f"💎 FULL HD 1080p ({best_1080p.get('seeds', 0)} сидов)",
             category_name="Идеальный Full HD 1080p",
             desc="Оптимальный баланс качества Blu-ray и скорости. Профессиональный дубляж, мгновенный запуск.",
             stars=9.8
-        ))
+        )
         used_ids.add(best_1080p["id"])
+
+    if preferred_quality == "1080p":
+        if card_1080p:
+            verified.append(card_1080p)
+        if card_4k:
+            verified.append(card_4k)
+    else:
+        if card_4k:
+            verified.append(card_4k)
+        if card_1080p:
+            verified.append(card_1080p)
 
     # If either 4K or 1080p is not available, fill up to 2 with next best healthy releases
     if len(verified) < 2:

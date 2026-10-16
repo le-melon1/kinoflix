@@ -14,6 +14,7 @@ import subprocess
 from backend.rutor import search_rutor
 from backend.rutracker import rutracker_client
 from backend.torrserver import torrserver_mgr
+from backend.settings import settings_mgr
 
 app = FastAPI(title="KinoFlix - Instant Torrent Cinema")
 
@@ -50,8 +51,12 @@ class SpeedLimitRequest(BaseModel):
 
 @app.on_event("startup")
 async def startup_event():
-    # Warm up TorrServer and check rutracker session
+    # Warm up TorrServer, apply persistent settings and check rutracker session
     torrserver_mgr.start()
+    try:
+        settings_mgr._apply_side_effects()
+    except Exception:
+        pass
     await rutracker_client.check_session()
 
 @app.on_event("shutdown")
@@ -78,7 +83,32 @@ async def get_network_status():
 async def set_custom_proxy(req: CustomProxyRequest):
     rutracker_client.custom_proxy = req.proxy_url.strip() if req.proxy_url else None
     rutracker_client.save_config()
+    settings_mgr.update({"network": {"custom_proxy": rutracker_client.custom_proxy or ""}})
     return {"status": "ok", "proxy": rutracker_client.get_proxy()}
+
+@app.get("/api/settings")
+async def get_settings():
+    """Retrieve all current persistent settings and live status"""
+    data = settings_mgr.get_all()
+    data["current_proxy"] = rutracker_client.get_proxy()
+    return data
+
+@app.post("/api/settings")
+async def update_settings(req: Dict[str, Any]):
+    """Update and persist settings with instant live application"""
+    updated = settings_mgr.update(req)
+    return updated
+
+@app.post("/api/settings/cache/clear")
+async def clear_cache_endpoint():
+    """Immediately flush TorrServer RAM and drop background torrents"""
+    res = torrserver_mgr.clear_cache()
+    return res
+
+@app.post("/api/settings/history/clear")
+async def clear_history_endpoint():
+    """Clear server-side cache and acknowledge history reset"""
+    return {"status": "ok", "message": "История просмотров очищена"}
 
 
 @app.get("/api/catalog")
@@ -170,20 +200,25 @@ async def search(
     online_info = await resolve_movie_online(query)
     search_terms = online_info.get("search_terms") or [query]
     
+    min_seeds = settings_mgr.get("search", "min_seeders", 2)
+    pref_quality = settings_mgr.get("playback", "default_quality", "4k")
+    pref_audio = settings_mgr.get("playback", "preferred_audio", "Любая")
+    trackers = settings_mgr.get("search", "trackers", {"rutor": True, "rutracker": True})
+
     results = []
     seen_ids = set()
 
     for q_term in search_terms:
         # Search Rutor (sorted by seeds descending)
-        if source in ("all", "rutor"):
-            rutor_results = await search_rutor(q_term, limit=limit, min_seeds=2)
+        if source in ("all", "rutor") and trackers.get("rutor", True):
+            rutor_results = await search_rutor(q_term, limit=limit, min_seeds=min_seeds)
             for r in rutor_results:
                 if r["id"] not in seen_ids:
                     seen_ids.add(r["id"])
                     results.append(r)
 
         # Search RuTracker if logged in or selected
-        if source in ("all", "rutracker"):
+        if source in ("all", "rutracker") and trackers.get("rutracker", True):
             rutracker_results = await rutracker_client.search(q_term, limit=limit)
             for r in rutracker_results:
                 if r["id"] not in seen_ids:
@@ -194,8 +229,8 @@ async def search(
         if any(r.get("seeds", 0) >= 15 for r in results):
             break
 
-    # STRICT FILTER: Never return dead torrents without seeds (seeds must be >= 1)
-    results = [r for r in results if r.get("seeds", 0) >= 1]
+    # STRICT FILTER: Never return dead torrents without seeds
+    results = [r for r in results if r.get("seeds", 0) >= min_seeds]
 
     # Sort strictly by seeders descending
     results.sort(key=lambda x: x.get("seeds", 0), reverse=True)
@@ -222,7 +257,12 @@ async def search(
         "is_series": is_tv,
         "total_seasons": max_season
     }
-    verified_cards = curate_verified_editions(results, min_seeds=3)
+    verified_cards = curate_verified_editions(
+        results,
+        min_seeds=min_seeds,
+        preferred_quality=pref_quality,
+        preferred_audio=pref_audio
+    )
 
     return {
         "query": query,
@@ -662,10 +702,11 @@ async def list_downloads():
 
 @app.post("/api/downloads/open-folder")
 async def open_downloads_folder():
-    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+    target = download_mgr.downloads_dir
+    os.makedirs(target, exist_ok=True)
     try:
-        subprocess.Popen(["open", DOWNLOADS_DIR])
-        return {"success": True, "path": DOWNLOADS_DIR}
+        subprocess.Popen(["open", target])
+        return {"success": True, "path": target}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -696,7 +737,7 @@ async def delete_download(filename: str):
 @app.get("/api/downloads/play/{filename}")
 async def play_downloaded(filename: str):
     safe_name = os.path.basename(filename)
-    target = os.path.join(DOWNLOADS_DIR, safe_name)
+    target = os.path.join(download_mgr.downloads_dir, safe_name)
     if not os.path.exists(target):
         raise HTTPException(status_code=404, detail="Файл не найден")
     return FileResponse(target, media_type="video/mp4")

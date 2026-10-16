@@ -51,7 +51,9 @@ const state = {
   currentCategory: 'all',
   canvasItems: [],
   canvasPage: 1,
-  canvasLoading: false
+  canvasLoading: false,
+  settings: null,
+  lastCompletedFilenames: null
 };
 
 // DOM Elements
@@ -220,6 +222,7 @@ function getEffectiveCurrentTime() {
 
 // --- INIT ---
 document.addEventListener('DOMContentLoaded', () => {
+  loadSettings();
   loadCatalog();
   checkRuTrackerStatus();
   setupScrollHeader();
@@ -581,8 +584,32 @@ async function pollDownloadsStatus() {
     if (isTvDl) {
       renderTvDownloadsFromData(data);
     }
+
+    // Detect newly completed downloads for macOS notification
+    const currentCompleted = data.items || [];
+    if (state.lastCompletedFilenames) {
+      currentCompleted.forEach(item => {
+        if (!state.lastCompletedFilenames.has(item.filename)) {
+          notifyDownloadCompleted(item);
+        }
+      });
+    }
+    state.lastCompletedFilenames = new Set(currentCompleted.map(i => i.filename));
   } catch (e) {
     console.error('Downloads poll error:', e);
+  }
+}
+
+function notifyDownloadCompleted(item) {
+  const notifyOn = (state.settings && state.settings.downloads && state.settings.downloads.notify_on_complete !== false);
+  showToast(`🎉 Фильм «${item.title}» успешно скачан!`, 'success');
+  if (notifyOn && 'Notification' in window && Notification.permission === 'granted') {
+    try {
+      new Notification('KinoFlix: Фильм скачан', {
+        body: `«${item.title}» (${item.size_str || ''}) сохранён на диск.`,
+        icon: item.poster || undefined
+      });
+    } catch (_) {}
   }
 }
 
@@ -1565,6 +1592,9 @@ function getStreamUrlForFile(hash, fileId) {
 
 async function preloadStream(item, fileId = null) {
   if (!item) return;
+  if (state.settings && state.settings.performance && state.settings.performance.preload_enabled === false) {
+    return;
+  }
   state.preloadedTorrentItem = item;
   const payload = {
     title: item.title,
@@ -2236,7 +2266,8 @@ function setupPlayerEventListeners() {
 
   // Next episode when current ends
   netflixVideo.addEventListener('ended', () => {
-    if (state.videoFiles && state.videoFiles.length > 1) {
+    const autoNext = !(state.settings && state.settings.playback && state.settings.playback.autoplay_next === false);
+    if (autoNext && state.videoFiles && state.videoFiles.length > 1) {
       const currentIdx = state.videoFiles.findIndex(f => f.id === state.activeFileIndex);
       if (currentIdx >= 0 && currentIdx < state.videoFiles.length - 1) {
         startNextEpisodeCountdown(state.videoFiles[currentIdx + 1]);
@@ -2337,7 +2368,7 @@ function seekRelative(seconds) {
   const dur = getEffectiveDuration();
   const target = Math.max(0, Math.min(dur, cur + seconds));
   seekToTime(target);
-  triggerRipple(seconds > 0 ? '+10' : '-10');
+  triggerRipple(seconds > 0 ? `+${seconds}` : `${seconds}`);
 }
 
 function updateProgress() {
@@ -2651,12 +2682,14 @@ function setupKeyboardShortcuts() {
         case 'arrowleft':
         case 'j':
           e.preventDefault();
-          seekRelative(-10);
+          const stepBack = (state.settings && state.settings.playback && state.settings.playback.seek_step) || 10;
+          seekRelative(-stepBack);
           break;
         case 'arrowright':
         case 'l':
           e.preventDefault();
-          seekRelative(10);
+          const stepFwd = (state.settings && state.settings.playback && state.settings.playback.seek_step) || 10;
+          seekRelative(stepFwd);
           break;
         case 'arrowup':
           e.preventDefault();
@@ -2798,17 +2831,98 @@ async function submitRuTrackerCookie() {
   }
 }
 
-async function openSettingsModal() {
-  document.getElementById('settingsModal').style.display = 'flex';
-  const uiSelect = document.getElementById('uiModeSelect');
-  if (uiSelect) {
-    uiSelect.value = state.tvMode ? 'tv' : 'desktop';
+// --- COMPREHENSIVE SETTINGS MANAGER ---
+async function loadSettings() {
+  try {
+    const res = await fetch('/api/settings');
+    if (res.ok) {
+      state.settings = await res.json();
+      if (state.settings && state.settings.ui && state.settings.ui.mode) {
+        setTvMode(state.settings.ui.mode === 'tv');
+      }
+    }
+  } catch (e) {
+    console.warn('Could not load settings:', e);
   }
+}
+
+function switchSettingsTab(tabName) {
+  document.querySelectorAll('.settings-tabs .s-tab').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById('tabBtn' + tabName.charAt(0).toUpperCase() + tabName.slice(1));
+  if (btn) btn.classList.add('active');
+
+  document.querySelectorAll('.settings-pane').forEach(p => p.style.display = 'none');
+  const pane = document.getElementById('pane' + tabName.charAt(0).toUpperCase() + tabName.slice(1));
+  if (pane) pane.style.display = 'flex';
+}
+
+async function openSettingsModal() {
+  const modal = document.getElementById('settingsModal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+
+  await loadSettings();
+
+  const pb = (state.settings && state.settings.playback) || {};
+  const pf = (state.settings && state.settings.performance) || {};
+  const dl = (state.settings && state.settings.downloads) || {};
+  const sr = (state.settings && state.settings.search) || {};
+  const ui = (state.settings && state.settings.ui) || {};
+  const nw = (state.settings && state.settings.network) || {};
+
+  const qSel = document.getElementById('settingDefaultQuality');
+  if (qSel) qSel.value = pb.default_quality || '4k';
+
+  const aSel = document.getElementById('settingPreferredAudio');
+  if (aSel) aSel.value = pb.preferred_audio || 'Любая';
+
+  const sSel = document.getElementById('settingSeekStep');
+  if (sSel) sSel.value = pb.seek_step || 10;
+
+  const apNext = document.getElementById('settingAutoplayNext');
+  if (apNext) apNext.checked = pb.autoplay_next !== false;
+
+  const rcSel = document.getElementById('settingRamCache');
+  if (rcSel) rcSel.value = pf.ram_cache_mb || 256;
+
+  const dlLim = document.getElementById('downloadLimitSelect');
+  if (dlLim) dlLim.value = pf.download_speed_limit_kb !== undefined ? pf.download_speed_limit_kb : 8000;
+
+  const preCheck = document.getElementById('settingPreload');
+  if (preCheck) preCheck.checked = pf.preload_enabled !== false;
+
+  const dlDir = document.getElementById('settingDownloadDir');
+  if (dlDir) dlDir.value = dl.download_dir || '';
+
+  const notifCheck = document.getElementById('settingNotifyComplete');
+  if (notifCheck) notifCheck.checked = dl.notify_on_complete !== false;
+
+  const minSeeds = document.getElementById('settingMinSeeds');
+  if (minSeeds) minSeeds.value = sr.min_seeders || 2;
+
+  const trRutor = document.getElementById('settingTrackerRutor');
+  if (trRutor) trRutor.checked = !(sr.trackers && sr.trackers.rutor === false);
+
+  const trRuTracker = document.getElementById('settingTrackerRuTracker');
+  if (trRuTracker) trRuTracker.checked = !(sr.trackers && sr.trackers.rutracker === false);
+
+  const proxyInput = document.getElementById('customProxyInput');
+  if (proxyInput) proxyInput.value = nw.custom_proxy || '';
+
+  const uiSelect = document.getElementById('uiModeSelect');
+  if (uiSelect) uiSelect.value = state.tvMode ? 'tv' : 'desktop';
+
+  const heroTr = document.getElementById('settingHeroTrailer');
+  if (heroTr) heroTr.checked = ui.hero_trailer !== false;
+
+  // Network routes status
   try {
     const res = await fetch('/api/network/status');
     const net = await res.json();
-    document.getElementById('netRtRoute').textContent = net.rutracker_routing;
-    document.getElementById('netTorrentRoute').textContent = net.stream_routing;
+    const rtRouteEl = document.getElementById('netRtRoute');
+    const torrentRouteEl = document.getElementById('netTorrentRoute');
+    if (rtRouteEl) rtRouteEl.textContent = net.rutracker_routing;
+    if (torrentRouteEl) torrentRouteEl.textContent = net.stream_routing;
   } catch (e) {}
 }
 
@@ -2817,26 +2931,118 @@ function handleUiModeChange(val) {
 }
 
 function closeSettingsModal() {
-  document.getElementById('settingsModal').style.display = 'none';
+  const modal = document.getElementById('settingsModal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function saveAllSettings() {
+  const payload = {
+    playback: {
+      default_quality: document.getElementById('settingDefaultQuality').value,
+      preferred_audio: document.getElementById('settingPreferredAudio').value,
+      seek_step: parseInt(document.getElementById('settingSeekStep').value) || 10,
+      autoplay_next: document.getElementById('settingAutoplayNext').checked
+    },
+    performance: {
+      ram_cache_mb: parseInt(document.getElementById('settingRamCache').value) || 256,
+      download_speed_limit_kb: parseInt(document.getElementById('downloadLimitSelect').value) || 0,
+      preload_enabled: document.getElementById('settingPreload').checked
+    },
+    downloads: {
+      download_dir: document.getElementById('settingDownloadDir').value.trim(),
+      notify_on_complete: document.getElementById('settingNotifyComplete').checked
+    },
+    search: {
+      min_seeders: parseInt(document.getElementById('settingMinSeeds').value) || 2,
+      trackers: {
+        rutor: document.getElementById('settingTrackerRutor').checked,
+        rutracker: document.getElementById('settingTrackerRuTracker').checked
+      }
+    },
+    ui: {
+      mode: document.getElementById('uiModeSelect').value,
+      hero_trailer: document.getElementById('settingHeroTrailer').checked
+    },
+    network: {
+      custom_proxy: document.getElementById('customProxyInput').value.trim()
+    }
+  };
+
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (res.ok) {
+      state.settings = await res.json();
+      setTvMode(payload.ui.mode === 'tv');
+      closeSettingsModal();
+      showToast('✅ Все настройки успешно сохранены!', 'success');
+    } else {
+      showToast('Ошибка сохранения настроек', 'error');
+    }
+  } catch (err) {
+    showToast('Ошибка подключения: ' + err.message, 'error');
+  }
 }
 
 async function saveSpeedLimits() {
-  const down = parseInt(document.getElementById('downloadLimitSelect').value);
-  const proxy = document.getElementById('customProxyInput').value.trim();
+  await saveAllSettings();
+}
+
+async function clearTorrServerCache() {
   try {
-    await fetch('/api/settings/speed-limit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ download_kb: down, upload_kb: 50 })
-    });
-    await fetch('/api/settings/proxy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ proxy_url: proxy || null })
-    });
-    closeSettingsModal();
+    const res = await fetch('/api/settings/cache/clear', { method: 'POST' });
+    if (res.ok) {
+      showToast('🧹 Кэш TorrServer успешно очищен!', 'success');
+    } else {
+      showToast('Не удалось очистить кэш', 'error');
+    }
   } catch (e) {
-    alert('Ошибка сохранения');
+    showToast('Ошибка очистки кэша: ' + e.message, 'error');
+  }
+}
+
+async function openDownloadsFolderAction() {
+  try {
+    const res = await fetch('/api/downloads/open-folder', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      showToast('📂 Папка загрузок открыта в Finder', 'info');
+    } else {
+      showToast('Не удалось открыть папку: ' + data.error, 'error');
+    }
+  } catch (e) {
+    showToast('Ошибка: ' + e.message, 'error');
+  }
+}
+
+async function clearWatchHistoryAction() {
+  if (!confirm('Очистить историю просмотров и сохранённые таймкоды?')) return;
+  try {
+    localStorage.removeItem('kinoflix_watch_history');
+    localStorage.removeItem('kinoflix_continue_watching');
+    localStorage.removeItem('kinoflix_progress');
+    await fetch('/api/settings/history/clear', { method: 'POST' });
+    showToast('🗑️ История просмотров успешно очищена', 'info');
+  } catch (e) {
+    showToast('Ошибка очистки истории', 'error');
+  }
+}
+
+function checkNotificationPermission(cb) {
+  if (cb.checked && 'Notification' in window) {
+    if (Notification.permission !== 'granted') {
+      Notification.requestPermission().then(perm => {
+        if (perm !== 'granted') {
+          cb.checked = false;
+          showToast('Уведомления браузера отключены в настройках', 'warning');
+        } else {
+          showToast('🔔 Уведомления включены!', 'success');
+        }
+      });
+    }
   }
 }
 

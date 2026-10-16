@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="referrer" content="no-referrer">
   <title>KinoFlix — Смотрите фильмы и сериалы онлайн</title>
-  <link rel="stylesheet" href="style.css?v=2.9">
+  <link rel="stylesheet" href="style.css?v=3.1">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -621,59 +621,217 @@
     </div>
   </div>
 
-  <!-- ROUTING & BANDWIDTH MODAL -->
+  <!-- COMPREHENSIVE SETTINGS MODAL -->
   <div class="netflix-modal-backdrop" id="settingsModal" style="display: none;" onclick="closeModalOnBackdrop(event)">
     <div class="netflix-settings-card">
       <div class="settings-modal-header">
-        <h3>Раздельное туннелирование и сеть</h3>
+        <h3>⚙️ Настройки KinoFlix</h3>
         <button class="modal-close-circle" onclick="closeSettingsModal()">✕</button>
       </div>
+      
       <div class="settings-modal-body">
-        
-        <div class="split-tunnel-info">
-          <div class="tunnel-row">
-            <span class="status-dot dot-green"></span>
-            <div>
-              <strong>Поиск и RuTracker (магнет-ссылки):</strong>
-              <div class="tunnel-sub" id="netRtRoute">Через VPN / Прокси (127.0.0.1:10809)</div>
+        <!-- Settings Category Tabs -->
+        <div class="settings-tabs">
+          <button class="s-tab active" id="tabBtnPlayback" onclick="switchSettingsTab('playback')">🎬 Воспроизведение</button>
+          <button class="s-tab" id="tabBtnPerformance" onclick="switchSettingsTab('performance')">⚡ Буфер и кэш</button>
+          <button class="s-tab" id="tabBtnDownloads" onclick="switchSettingsTab('downloads')">💾 Загрузки</button>
+          <button class="s-tab" id="tabBtnSearch" onclick="switchSettingsTab('search')">🔍 Поиск и трекеры</button>
+          <button class="s-tab" id="tabBtnNetwork" onclick="switchSettingsTab('network')">🌐 Сеть и VPN</button>
+          <button class="s-tab" id="tabBtnUI" onclick="switchSettingsTab('ui')">📺 Интерфейс</button>
+        </div>
+
+        <!-- PANE 1: PLAYBACK -->
+        <div class="settings-pane" id="panePlayback">
+          <div class="n-input-group">
+            <label>Приоритет качества видео по умолчанию:</label>
+            <select id="settingDefaultQuality">
+              <option value="4k">👑 4K UHD (2160p HDR) — Высшая чёткость</option>
+              <option value="1080p" selected>💎 Full HD (1080p BDRip) — Оптимум и быстрый старт</option>
+              <option value="auto">⚡ Авто — По максимальной скорости раздачи</option>
+            </select>
+          </div>
+
+          <div class="n-input-group">
+            <label>Предпочитаемая озвучка / студия:</label>
+            <select id="settingPreferredAudio">
+              <option value="Любая" selected>Любая качественная озвучка</option>
+              <option value="Официальный дубляж">Официальный дубляж (Лицензия)</option>
+              <option value="Red Head Sound">Red Head Sound (RHS)</option>
+              <option value="HDRezka Studio">HDRezka Studio</option>
+              <option value="LostFilm">LostFilm</option>
+              <option value="Кубик в Кубе">Кубик в Кубе</option>
+              <option value="Jaskier">Jaskier</option>
+              <option value="TVShows">TVShows</option>
+            </select>
+          </div>
+
+          <div class="n-input-group">
+            <label>Шаг перемотки клавишами стрелок (← / →):</label>
+            <select id="settingSeekStep">
+              <option value="5">5 секунд (Точная)</option>
+              <option value="10" selected>10 секунд (Стандартная)</option>
+              <option value="15">15 секунд (Быстрая)</option>
+            </select>
+          </div>
+
+          <label class="n-toggle-row">
+            <div class="n-toggle-info">
+              <span class="n-toggle-title">Автопереход к следующей серии</span>
+              <span class="n-toggle-sub">Автоматически запускать следующую серию сериала с 5-секундным таймером</span>
+            </div>
+            <input type="checkbox" id="settingAutoplayNext" class="n-checkbox-switch" checked>
+          </label>
+        </div>
+
+        <!-- PANE 2: PERFORMANCE & CACHE -->
+        <div class="settings-pane" id="panePerformance" style="display: none;">
+          <div class="n-input-group">
+            <label>Размер оперативного буфера (RAM Cache):</label>
+            <select id="settingRamCache">
+              <option value="64">64 МБ (Для слабых ПК / экономия памяти)</option>
+              <option value="128">128 МБ (Стандартный)</option>
+              <option value="256" selected>256 МБ (Рекомендуется для 1080p и 4K)</option>
+              <option value="512">512 МБ (Максимум для тяжёлых 4K HDR ремуксов)</option>
+            </select>
+          </div>
+
+          <div class="n-input-group">
+            <label>Ограничение скорости загрузки видеопотока:</label>
+            <select id="downloadLimitSelect">
+              <option value="0">Без ограничений (Максимум)</option>
+              <option value="15000">15 МБ/с (Быстро)</option>
+              <option value="8000" selected>8 МБ/с (Стабильно, не забивает Wi-Fi)</option>
+              <option value="4000">4 МБ/с (Для слабого интернета)</option>
+            </select>
+          </div>
+
+          <label class="n-toggle-row">
+            <div class="n-toggle-info">
+              <span class="n-toggle-title">Мгновенная предзагрузка видео</span>
+              <span class="n-toggle-sub">Начинать фоновое скачивание первых секунд при открытии карточки фильма</span>
+            </div>
+            <input type="checkbox" id="settingPreload" class="n-checkbox-switch" checked>
+          </label>
+
+          <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); padding: 14px; border-radius: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <strong style="color: #fff; font-size: 0.92rem;">Очистка кэша торрентов</strong>
+                <div style="color: #888; font-size: 0.78rem; margin-top: 2px;">Освобождает оперативную память и сбрасывает фоновые раздачи</div>
+              </div>
+              <button class="n-secondary-action-btn danger" onclick="clearTorrServerCache()">🧹 Очистить кэш</button>
             </div>
           </div>
-          <div class="tunnel-row">
-            <span class="status-dot dot-green"></span>
-            <div>
-              <strong>Трансляция торрента и видеопоток:</strong>
-              <div class="tunnel-sub" id="netTorrentRoute">Прямой интернет (работает с VPN и без него)</div>
+        </div>
+
+        <!-- PANE 3: DOWNLOADS -->
+        <div class="settings-pane" id="paneDownloads" style="display: none;">
+          <div class="n-input-group">
+            <label>Папка для сохранения загрузок на диске:</label>
+            <div class="n-input-row-inline">
+              <input type="text" id="settingDownloadDir" placeholder="~/Downloads/KinoFlix">
+              <button class="n-secondary-action-btn" onclick="openDownloadsFolderAction()">📂 В Finder</button>
             </div>
           </div>
-          <div class="tunnel-tip">
-            ✔ Торрент-трафик не забивает ваш VPN-канал, интернет остаётся стабильным и быстрым.
+
+          <label class="n-toggle-row">
+            <div class="n-toggle-info">
+              <span class="n-toggle-title">Уведомления macOS</span>
+              <span class="n-toggle-sub">Показывать системное уведомление на рабочем столе, когда фильм скачан</span>
+            </div>
+            <input type="checkbox" id="settingNotifyComplete" class="n-checkbox-switch" checked onchange="checkNotificationPermission(this)">
+          </label>
+        </div>
+
+        <!-- PANE 4: SEARCH & TRACKERS -->
+        <div class="settings-pane" id="paneSearch" style="display: none;">
+          <div class="n-input-group">
+            <label>Минимальное количество сидов (Фильтр мёртвых раздач):</label>
+            <select id="settingMinSeeds">
+              <option value="2" selected>2 сида (Показывать больше редких раздач)</option>
+              <option value="5">5 сидов (Надёжная скорость)</option>
+              <option value="10">10 сидов (Быстрый запуск без зависаний)</option>
+              <option value="20">20 сидов (Только сверхпопулярные раздачи)</option>
+            </select>
+          </div>
+
+          <label class="n-toggle-row">
+            <div class="n-toggle-info">
+              <span class="n-toggle-title">Rutor.info</span>
+              <span class="n-toggle-sub">Открытый каталог с прямыми зеркалами, работает без VPN и без авторизации</span>
+            </div>
+            <input type="checkbox" id="settingTrackerRutor" class="n-checkbox-switch" checked>
+          </label>
+
+          <label class="n-toggle-row">
+            <div class="n-toggle-info">
+              <span class="n-toggle-title">RuTracker.net</span>
+              <span class="n-toggle-sub">Крупнейший трекер с авторизацией, редкими релизами и магнет-ссылками</span>
+            </div>
+            <input type="checkbox" id="settingTrackerRuTracker" class="n-checkbox-switch" checked>
+          </label>
+        </div>
+
+        <!-- PANE 5: NETWORK & PROXY -->
+        <div class="settings-pane" id="paneNetwork" style="display: none;">
+          <div class="split-tunnel-info">
+            <div class="tunnel-row">
+              <span class="status-dot dot-green"></span>
+              <div>
+                <strong>Поиск и RuTracker (магнет-ссылки):</strong>
+                <div class="tunnel-sub" id="netRtRoute">Через VPN / Прокси (127.0.0.1:10809)</div>
+              </div>
+            </div>
+            <div class="tunnel-row">
+              <span class="status-dot dot-green"></span>
+              <div>
+                <strong>Трансляция торрента и видеопоток:</strong>
+                <div class="tunnel-sub" id="netTorrentRoute">Прямой интернет (работает с VPN и без него)</div>
+              </div>
+            </div>
+            <div class="tunnel-tip">
+              ✔ Торрент-трафик не забивает ваш VPN-канал, интернет остаётся стабильным и быстрым.
+            </div>
+          </div>
+
+          <div class="n-input-group" style="margin-top: 14px;">
+            <label>Прокси для RuTracker (автоопределение v2RayTun / Clash):</label>
+            <input type="text" id="customProxyInput" placeholder="http://127.0.0.1:10809">
           </div>
         </div>
 
-        <div class="n-input-group" style="margin-top: 16px;">
-          <label>Прокси для RuTracker (автоопределение v2RayTun / Clash):</label>
-          <input type="text" id="customProxyInput" placeholder="http://127.0.0.1:10809">
+        <!-- PANE 6: UI & HISTORY -->
+        <div class="settings-pane" id="paneUI" style="display: none;">
+          <div class="n-input-group">
+            <label>Режим отображения интерфейса:</label>
+            <select id="uiModeSelect" onchange="handleUiModeChange(this.value)">
+              <option value="desktop">Компьютер / Мышь (Стандартный интерфейс)</option>
+              <option value="tv">Режим для ТВ (Пульт, навигация стрелками D-Pad)</option>
+            </select>
+          </div>
+
+          <label class="n-toggle-row">
+            <div class="n-toggle-info">
+              <span class="n-toggle-title">Видео-трейлеры на главном баннере</span>
+              <span class="n-toggle-sub">Автоматически воспроизводить фоновый трейлер на баннере новинок</span>
+            </div>
+            <input type="checkbox" id="settingHeroTrailer" class="n-checkbox-switch" checked>
+          </label>
+
+          <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); padding: 14px; border-radius: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <strong style="color: #fff; font-size: 0.92rem;">История просмотров</strong>
+                <div style="color: #888; font-size: 0.78rem; margin-top: 2px;">Очищает блок «Продолжить просмотр» и сбрасывает сохранённые таймкоды</div>
+              </div>
+              <button class="n-secondary-action-btn danger" onclick="clearWatchHistoryAction()">🗑️ Очистить историю</button>
+            </div>
+          </div>
         </div>
 
-        <div class="n-input-group">
-          <label>Ограничение скорости загрузки видео:</label>
-          <select id="downloadLimitSelect">
-            <option value="0">Без ограничений (максимум)</option>
-            <option value="15000">15 МБ/с (быстро)</option>
-            <option value="8000" selected>8 МБ/с (стабильно)</option>
-            <option value="4000">4 МБ/с (для слабого интернета)</option>
-          </select>
+        <div class="settings-save-bar">
+          <button class="netflix-red-btn" onclick="saveAllSettings()">Сохранить все настройки</button>
         </div>
-
-        <div class="n-input-group" style="margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.1);">
-          <label>📺 Режим отображения (для управления пультом или мышью):</label>
-          <select id="uiModeSelect" onchange="handleUiModeChange(this.value)">
-            <option value="desktop">Компьютер / Мышь (Стандартный интерфейс)</option>
-            <option value="tv">Режим для ТВ (Пульт, навигация стрелками D-Pad)</option>
-          </select>
-        </div>
-
-        <button class="netflix-red-btn" onclick="saveSpeedLimits()">Применить настройки</button>
       </div>
     </div>
   </div>
@@ -729,6 +887,6 @@
   <!-- Toast Notification Container -->
   <div id="toastContainer" style="position: fixed; top: 24px; right: 24px; z-index: 999999; display: flex; flex-direction: column; gap: 10px; pointer-events: none;"></div>
 
-  <script src="app.js?v=3.0"></script>
+  <script src="app.js?v=3.1"></script>
 </body>
 </html>

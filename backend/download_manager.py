@@ -27,7 +27,8 @@ class DownloadTask:
         poster: str = "",
         total_bytes: int = 0,
         magnet: str = "",
-        topic_id: Optional[int] = None
+        topic_id: Optional[int] = None,
+        target_dir: Optional[str] = None
     ):
         self.task_id = task_id
         self.torrent_hash = torrent_hash
@@ -49,10 +50,11 @@ class DownloadTask:
         self.cancel_requested = False
         self.created_at = time.time()
         self.worker_task: Optional[asyncio.Task] = None
+        self.target_dir = target_dir or DOWNLOADS_DIR
 
     @property
     def target_path(self) -> str:
-        return os.path.join(DOWNLOADS_DIR, self.filename)
+        return os.path.join(self.target_dir, self.filename)
 
     @property
     def part_path(self) -> str:
@@ -91,6 +93,18 @@ class DownloadManager:
     def __init__(self):
         self.tasks: Dict[str, DownloadTask] = {}
         self._meta_cache: Dict[str, Any] = self._load_meta()
+        self._downloads_dir = DOWNLOADS_DIR
+
+    @property
+    def downloads_dir(self) -> str:
+        return self._downloads_dir
+
+    @downloads_dir.setter
+    def downloads_dir(self, val: str):
+        if val and isinstance(val, str):
+            expanded = os.path.expanduser(val.strip())
+            os.makedirs(expanded, exist_ok=True)
+            self._downloads_dir = expanded
 
     def _load_meta(self) -> Dict[str, Any]:
         if os.path.exists(META_FILE):
@@ -118,14 +132,14 @@ class DownloadManager:
         magnet: Optional[str] = None,
         topic_id: Optional[int] = None
     ) -> Dict[str, Any]:
-        os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+        os.makedirs(self.downloads_dir, exist_ok=True)
         raw_title = title or "movie"
         safe_base = re.sub(r'[\\/*?:"<>|]', "_", raw_title).strip()
         safe_name = filename or f"{safe_base}.mp4"
         if not any(safe_name.lower().endswith(ext) for ext in [".mp4", ".mkv", ".avi", ".ts"]):
             safe_name += ".mp4"
 
-        target_path = os.path.join(DOWNLOADS_DIR, safe_name)
+        target_path = os.path.join(self.downloads_dir, safe_name)
         if os.path.exists(target_path):
             if os.path.getsize(target_path) > 1024 * 1024:
                 return {
@@ -205,7 +219,8 @@ class DownloadManager:
             poster=poster,
             total_bytes=total_file_bytes,
             magnet=magnet or "",
-            topic_id=topic_id
+            topic_id=topic_id,
+            target_dir=self.downloads_dir
         )
 
         self.tasks[task_id] = task
@@ -357,7 +372,7 @@ class DownloadManager:
                 task.worker_task.cancel()
             task.status = "canceled"
             del self.tasks[safe_name]
-        part_path = os.path.join(DOWNLOADS_DIR, safe_name + ".part")
+        part_path = os.path.join(self.downloads_dir, safe_name + ".part")
         if os.path.exists(part_path):
             try:
                 os.remove(part_path)
@@ -368,7 +383,7 @@ class DownloadManager:
     async def delete_download(self, filename: str) -> bool:
         await self.cancel_download(filename)
         safe_name = os.path.basename(filename)
-        target = os.path.join(DOWNLOADS_DIR, safe_name)
+        target = os.path.join(self.downloads_dir, safe_name)
         deleted = False
         if os.path.exists(target):
             try:
@@ -382,7 +397,7 @@ class DownloadManager:
         return deleted
 
     def get_status_payload(self) -> Dict[str, Any]:
-        os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+        os.makedirs(self.downloads_dir, exist_ok=True)
         active_list = []
         completed_items = []
 
@@ -393,10 +408,10 @@ class DownloadManager:
 
         # 2. Files on disk
         try:
-            for fname in os.listdir(DOWNLOADS_DIR):
+            for fname in os.listdir(self.downloads_dir):
                 if fname.startswith("."):
                     continue
-                fpath = os.path.join(DOWNLOADS_DIR, fname)
+                fpath = os.path.join(self.downloads_dir, fname)
                 if not os.path.isfile(fpath):
                     continue
 
@@ -449,7 +464,7 @@ class DownloadManager:
             print(f"Error reading downloads directory: {e}")
 
         return {
-            "downloads_dir": DOWNLOADS_DIR,
+            "downloads_dir": self.downloads_dir,
             "active": active_list,
             "items": completed_items
         }
