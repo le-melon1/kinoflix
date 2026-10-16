@@ -18,14 +18,20 @@
     <div class="nav-left">
       <div class="netflix-logo" onclick="goHome()">NETFLIX</div>
       <nav class="nav-links">
-        <a class="nav-link active" onclick="switchCategory('all')">Главная</a>
-        <a class="nav-link" onclick="switchCategory('series')">Сериалы</a>
-        <a class="nav-link" onclick="switchCategory('movies')">Фильмы</a>
-        <a class="nav-link" onclick="switchCategory('trending')">Новинки и популярное</a>
+        <a class="nav-link active" id="navAll" onclick="switchCategory('all')">Главная</a>
+        <a class="nav-link" id="navSeries" onclick="switchCategory('series')">Сериалы</a>
+        <a class="nav-link" id="navMovies" onclick="switchCategory('movies')">Фильмы</a>
+        <a class="nav-link" id="navTrending" onclick="switchCategory('trending')">Новинки</a>
+        <a class="nav-link" id="navDownloads" onclick="openDownloadsView()">Загрузки</a>
       </nav>
     </div>
 
     <div class="nav-right">
+      <!-- TV Mode Button -->
+      <button class="tv-mode-btn" id="tvModeBtn" onclick="toggleTvMode()" title="Режим для ТВ (управление стрелками и цифрами)">
+        📺 <span id="tvModeBtnText">Для ТВ</span>
+      </button>
+
       <!-- Netflix Expanding Search Bar -->
       <div class="netflix-search-box" id="searchBox">
         <button class="search-trigger-btn" onclick="toggleSearchInput()" title="Поиск фильмов и сериалов">
@@ -127,6 +133,61 @@
       <div class="netflix-grid" id="searchGrid"></div>
     </div>
 
+    <!-- LOCAL DOWNLOADS VIEW (СКАЧАННЫЕ ФИЛЬМЫ) -->
+    <div id="downloadsView" style="display: none; padding: 100px 4% 40px;">
+      <div class="downloads-header-bar" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 16px;">
+        <div>
+          <h1 style="font-size: 28px; font-weight: 800; color: #fff; margin-bottom: 6px;">💾 Загруженные фильмы и сериалы</h1>
+          <p style="color: #aaa; font-size: 14px;">Локальная папка: <code style="color: #46d369; background: rgba(0,0,0,0.5); padding: 2px 6px; border-radius: 4px;">~/Downloads/KinoFlix</code></p>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button class="n-secondary-btn" onclick="openDownloadsFinder()" style="background: rgba(255,255,255,0.12); color: #fff; border: 1px solid rgba(255,255,255,0.25); padding: 10px 18px; border-radius: 4px; cursor: pointer; font-weight: 600;">
+            📂 Открыть в Finder
+          </button>
+          <button class="n-secondary-btn" onclick="loadDownloadsList()" style="background: rgba(255,255,255,0.12); color: #fff; border: 1px solid rgba(255,255,255,0.25); padding: 10px 14px; border-radius: 4px; cursor: pointer;">
+            🔄 Обновить
+          </button>
+        </div>
+      </div>
+      <div id="downloadsGrid" class="netflix-grid"></div>
+    </div>
+
+    <!-- SMART TV VIEW (РЕЖИМ ДЛЯ ТВ С УПРАВЛЕНИЕМ СТРЕЛКАМИ И ЦИФРАМИ) -->
+    <div id="tvView" class="tv-view" style="display: none;">
+      <div class="tv-banner">
+        <div class="tv-banner-left">
+          <span class="tv-badge">📺 РЕЖИМ ДЛЯ ТВ</span>
+          <span class="tv-instructions">Нажмите цифру <strong>[1]–[9], [0]</strong> или используйте <strong>Стрелки + Enter</strong> для выбора</span>
+        </div>
+        <div class="tv-banner-right">
+          <span class="tv-page-info" id="tvPageInfo">Страница 1</span>
+          <button class="tv-exit-btn" onclick="setTvMode(false)">[0] Выход из ТВ режима</button>
+        </div>
+      </div>
+
+      <!-- TV Category Pills -->
+      <div class="tv-tabs-bar" id="tvTabsBar">
+        <button class="tv-tab active" onclick="switchTvCategory('all')">Все (Тренды)</button>
+        <button class="tv-tab" onclick="switchTvCategory('new')">🔥 Новинки</button>
+        <button class="tv-tab" onclick="switchTvCategory('series')">Сериалы</button>
+        <button class="tv-tab" onclick="switchTvCategory('top100')">🏆 Топ-100</button>
+        <button class="tv-tab" onclick="switchTvCategory('comedies')">😂 Комедии</button>
+        <button class="tv-tab" onclick="switchTvCategory('anime')">⛩️ Аниме</button>
+        <button class="tv-tab" onclick="switchTvCategory('detectives')">🔍 Детективы</button>
+        <button class="tv-tab" onclick="switchTvCategory('downloads')">💾 Загрузки</button>
+      </div>
+
+      <!-- Exactly at most 10 items grid -->
+      <div class="tv-cards-grid" id="tvCardsGrid"></div>
+
+      <!-- TV Navigation bottom bar -->
+      <div class="tv-bottom-nav">
+        <button class="tv-nav-btn" id="tvPrevBtn" onclick="tvPagePrev()">◀ [7] Предыдущие 10</button>
+        <button class="tv-nav-btn" id="tvNextBtn" onclick="tvPageNext()">[8] Следующие 10 ▶</button>
+        <button class="tv-nav-btn" onclick="tvOpenSearchPrompt()">[9] 🔍 Поиск фильма</button>
+      </div>
+    </div>
+
   </main>
 
   <!-- NETFLIX DETAIL & EDITIONS MODAL (1 В 1) -->
@@ -146,6 +207,9 @@
                 <path d="M8 5v14l11-7z"/>
               </svg>
               <span>Смотреть</span>
+            </button>
+            <button class="n-secondary-btn" id="modalSaveDownloadBtn" onclick="saveActiveMovieToDisk()" style="margin-left: 10px; background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); padding: 10px 18px; border-radius: 4px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+              💾 Скачать на диск
             </button>
             <button class="circle-action-btn" title="В избранное">＋</button>
             <button class="circle-action-btn" title="Нравится">👍</button>

@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+*.log
+uvicorn.log
+test_out.mp4
+config.db
+settings.json
+.DS_Store

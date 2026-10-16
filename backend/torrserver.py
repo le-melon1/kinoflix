@@ -177,15 +177,33 @@ class TorrServerManager:
 
     def start(self):
         iface, ip, _ = get_physical_net_info()
+        need_restart = True
         if self.is_running():
-            if self.physical_ip == ip and self.physical_iface == iface:
-                return
-            else:
-                self.stop()
-                try:
-                    subprocess.run(["pkill", "-9", "-f", "TorrServer"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                except Exception:
-                    pass
+            try:
+                pids = subprocess.check_output(['pgrep', '-f', 'TorrServer'], text=True).strip().split()
+                has_dylib = False
+                for p in pids:
+                    try:
+                        lsof_out = subprocess.check_output(['lsof', '-p', p], text=True)
+                        if 'bind_direct.dylib' in lsof_out:
+                            has_dylib = True
+                            break
+                    except Exception:
+                        pass
+                if has_dylib and self.physical_ip == ip and self.physical_iface == iface:
+                    need_restart = False
+            except Exception:
+                need_restart = True
+
+        if not need_restart:
+            return
+
+        self.stop()
+        try:
+            subprocess.run(["pkill", "-9", "-f", "TorrServer"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+        time.sleep(0.3)
 
         os.makedirs(TORRSERVER_DIR, exist_ok=True)
         if not os.path.exists(TORRSERVER_BIN):
@@ -195,9 +213,12 @@ class TorrServerManager:
         self.physical_iface = iface
         self.physical_ip = ip
 
-        # Prepare environment
+        # Prepare environment with dynamic library interposer for physical VPN bypass
         env = os.environ.copy()
         env["PATH"] = f"/opt/homebrew/bin:{env.get('PATH', '')}"
+        if os.path.exists(BIND_DIRECT_DYLIB):
+            env["DYLD_INSERT_LIBRARIES"] = BIND_DIRECT_DYLIB
+            env["PHYSICAL_INTERFACE"] = self.physical_iface
 
         # Command: bind torrent p2p traffic to physical interface IP
         cmd = [
@@ -235,23 +256,42 @@ class TorrServerManager:
             self.process = None
 
     def apply_network_safety_settings(self):
-        """Apply safe speed and peer limits to prevent network lag"""
+        """Apply high-speed peer and buffer settings strictly bypassing VPN"""
         try:
+            trackers_str = "\n".join([
+                "udp://tracker.opentrackr.org:1337/announce",
+                "udp://open.stealth.si:80/announce",
+                "udp://tracker.openbittorrent.com:6969/announce",
+                "udp://tracker.torrent.eu.org:451/announce",
+                "udp://explodie.org:6969/announce",
+                "udp://tracker.cyberia.is:6969/announce",
+                "udp://tracker.dler.org:6969/announce",
+                "udp://tracker.tiny-vps.com:6969/announce",
+                "udp://opentor.net:6969",
+                "http://retracker.local/announce"
+            ])
             settings = {
-                "CacheSize": 67108864,         # 64MB RAM cache (lightweight)
-                "ReaderReadAHead": 90,
-                "PreloadCache": 40,
+                "CacheSize": 268435456,         # 256MB RAM cache (smooth 1080p/4K)
+                "ReaderReadAHead": 95,
+                "PreloadCache": 25,
                 "UseDisk": False,              # Stream strictly in RAM
-                "ConnectionsLimit": 25,        # Safe peer limit
-                "DownloadRateLimit": self.download_limit_kb * 1024,
-                "UploadRateLimit": self.upload_limit_kb * 1024,
+                "ConnectionsLimit": 120,       # Up to 120 peer connections
+                "DownloadRateLimit": 0,        # Max speed
+                "UploadRateLimit": 0,          # Healthy seeding so swarm unchokes us
                 "ForceEncrypt": False,
-                "ResponsiveMode": True
+                "ResponsiveMode": True,
+                "DisableUPNP": False,
+                "DisableDHT": False,
+                "DisablePEX": False,
+                "DisableTCP": False,
+                "DisableUTP": False,
+                "DefaultTrackers": trackers_str,
+                "RetrackersMode": 1
             }
             httpx.post(
                 f"{TORRSERVER_URL}/settings",
                 json={"action": "set", "sets": settings},
-                timeout=4.0
+                timeout=10.0
             )
         except Exception as e:
             print(f"Warning: could not apply TorrServer settings immediately: {e}")
@@ -323,6 +363,11 @@ class TorrServerManager:
             seasons_dict = {}
             if is_series:
                 seasons_dict = parse_series_episodes(video_files)
+                enriched_video_files = []
+                for s_k in sorted(seasons_dict.keys(), key=lambda x: int(x)):
+                    enriched_video_files.extend(seasons_dict[s_k])
+                if enriched_video_files:
+                    video_files = enriched_video_files
                 # First episode of first season is default
                 first_season = next(iter(seasons_dict.values()), [])
                 default_file = first_season[0] if first_season else video_files[0]

@@ -424,5 +424,104 @@ async def download_rutracker_torrent(topic_id: str):
         headers={"Content-Disposition": f'attachment; filename="rutracker_{topic_id}.torrent"'}
     )
 
+DOWNLOADS_DIR = os.path.expanduser("~/Downloads/KinoFlix")
+os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+
+class DownloadStartRequest(BaseModel):
+    torrent_hash: str
+    file_id: int = 1
+    filename: str
+    title: Optional[str] = None
+
+@app.get("/api/downloads/list")
+async def list_downloads():
+    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+    items = []
+    try:
+        for fname in os.listdir(DOWNLOADS_DIR):
+            if fname.startswith("."):
+                continue
+            fpath = os.path.join(DOWNLOADS_DIR, fname)
+            if os.path.isfile(fpath):
+                st = os.stat(fpath)
+                size_mb = round(st.st_size / (1024 * 1024), 1)
+                size_str = f"{size_mb} МБ" if size_mb < 1024 else f"{round(size_mb / 1024, 2)} ГБ"
+                items.append({
+                    "filename": fname,
+                    "title": fname.rsplit(".", 1)[0],
+                    "size_mb": size_mb,
+                    "size_str": size_str,
+                    "path": fpath,
+                    "mtime": st.st_mtime,
+                    "stream_url": f"/api/downloads/play/{urllib.parse.quote(fname)}",
+                    "is_complete": not fname.endswith(".part")
+                })
+        items.sort(key=lambda x: x["mtime"], reverse=True)
+    except Exception as e:
+        print(f"Error listing downloads: {e}")
+
+    return {
+        "downloads_dir": DOWNLOADS_DIR,
+        "items": items
+    }
+
+@app.post("/api/downloads/open-folder")
+async def open_downloads_folder():
+    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+    try:
+        subprocess.Popen(["open", DOWNLOADS_DIR])
+        return {"success": True, "path": DOWNLOADS_DIR}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@app.post("/api/downloads/start")
+async def start_download(req: DownloadStartRequest):
+    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+    safe_name = re.sub(r'[\\/*?:"<>|]', "_", req.filename)
+    target_path = os.path.join(DOWNLOADS_DIR, safe_name)
+
+    if os.path.exists(target_path) and os.path.getsize(target_path) > 1024 * 1024:
+        return {"status": "already_exists", "path": target_path, "filename": safe_name}
+
+    stream_src = f"http://127.0.0.1:8090/stream/{urllib.parse.quote(safe_name)}?link={req.torrent_hash}&index={req.file_id}&play"
+    part_path = target_path + ".part"
+
+    async def download_file_task():
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream("GET", stream_src) as resp:
+                    with open(part_path, "wb") as f:
+                        async for chunk in resp.aiter_bytes(chunk_size=256 * 1024):
+                            f.write(chunk)
+            if os.path.exists(part_path):
+                os.rename(part_path, target_path)
+        except Exception as e:
+            print(f"Background download error: {e}")
+
+    asyncio.create_task(download_file_task())
+    return {"status": "started", "path": target_path, "filename": safe_name}
+
+@app.delete("/api/downloads/{filename}")
+async def delete_download(filename: str):
+    safe_name = os.path.basename(filename)
+    target = os.path.join(DOWNLOADS_DIR, safe_name)
+    part = target + ".part"
+    deleted = False
+    if os.path.exists(target):
+        os.remove(target)
+        deleted = True
+    if os.path.exists(part):
+        os.remove(part)
+        deleted = True
+    return {"success": deleted}
+
+@app.get("/api/downloads/play/{filename}")
+async def play_downloaded(filename: str):
+    safe_name = os.path.basename(filename)
+    target = os.path.join(DOWNLOADS_DIR, safe_name)
+    if not os.path.exists(target):
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    return FileResponse(target, media_type="video/mp4")
+
 # Mount static frontend
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

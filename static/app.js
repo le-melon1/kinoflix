@@ -25,7 +25,12 @@ const state = {
   searchTimeout: null,
   controlsTimeout: null,
   statsInterval: null,
-  rutrackerLoggedIn: false
+  rutrackerLoggedIn: false,
+  tvMode: false,
+  tvCategory: 'all',
+  tvItems: [],
+  tvPageIndex: 0,
+  tvFocusIndex: 0
 };
 
 // DOM Elements
@@ -38,6 +43,13 @@ const searchResultsView = document.getElementById('searchResultsView');
 const searchQueryLabel = document.getElementById('searchQueryLabel');
 const searchLoader = document.getElementById('searchLoader');
 const searchGrid = document.getElementById('searchGrid');
+const downloadsView = document.getElementById('downloadsView');
+const downloadsGrid = document.getElementById('downloadsGrid');
+const tvView = document.getElementById('tvView');
+const tvCardsGrid = document.getElementById('tvCardsGrid');
+const tvPageInfo = document.getElementById('tvPageInfo');
+const tvModeBtnText = document.getElementById('tvModeBtnText');
+const tvTabsBar = document.getElementById('tvTabsBar');
 
 // Billboard DOM
 const billboardImg = document.getElementById('billboardImg');
@@ -178,6 +190,17 @@ document.addEventListener('DOMContentLoaded', () => {
   setupScrollHeader();
   setupPlayerEventListeners();
   setupKeyboardShortcuts();
+
+  const savedTv = localStorage.getItem('kinoflix_tv_mode') === 'true';
+  if (savedTv) {
+    setTvMode(true);
+  }
+
+  window.addEventListener('beforeunload', () => {
+    if (state.activeTorrentHash) {
+      navigator.sendBeacon('/api/stream/stop', JSON.stringify({ torrent_hash: state.activeTorrentHash }));
+    }
+  });
 });
 
 // Header scroll effect
@@ -197,11 +220,15 @@ async function loadCatalog() {
     const res = await fetch('/api/catalog');
     state.catalog = await res.json();
 
-    if (state.catalog.billboard) {
-      renderBillboard(state.catalog.billboard);
-    }
-    if (state.catalog.categories) {
-      renderRows(state.catalog.categories);
+    if (state.tvMode) {
+      refreshTvItems();
+    } else {
+      if (state.catalog.billboard) {
+        renderBillboard(state.catalog.billboard);
+      }
+      if (state.catalog.categories) {
+        renderRows(state.catalog.categories);
+      }
     }
   } catch (err) {
     console.error('Catalog load error:', err);
@@ -303,9 +330,143 @@ function clearSearch() {
 }
 
 function goHome() {
+  if (state.tvMode) {
+    homeView.style.display = 'none';
+    searchResultsView.style.display = 'none';
+    if (downloadsView) downloadsView.style.display = 'none';
+    if (tvView) tvView.style.display = 'block';
+    refreshTvItems();
+    return;
+  }
   homeView.style.display = 'block';
   searchResultsView.style.display = 'none';
+  if (downloadsView) downloadsView.style.display = 'none';
+  if (tvView) tvView.style.display = 'none';
   searchBox.classList.remove('open');
+}
+
+async function openDownloadsView() {
+  document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+  const dlNav = document.getElementById('navDownloads');
+  if (dlNav) dlNav.classList.add('active');
+
+  homeView.style.display = 'none';
+  searchResultsView.style.display = 'none';
+  if (tvView) tvView.style.display = 'none';
+  downloadsView.style.display = 'block';
+
+  await loadDownloadsList();
+}
+
+async function loadDownloadsList() {
+  if (!downloadsGrid) return;
+  downloadsGrid.innerHTML = `
+    <div style="grid-column: 1/-1; padding: 40px; text-align: center; color: #888;">
+      <div class="netflix-spinner-circle" style="width:36px; height:36px; margin:0 auto 10px;"></div>
+      Загрузка списка скачанных файлов...
+    </div>
+  `;
+  try {
+    const res = await fetch('/api/downloads/list');
+    const data = await res.json();
+    const items = data.items || [];
+    if (!items.length) {
+      downloadsGrid.innerHTML = `
+        <div style="grid-column: 1/-1; padding: 50px 20px; text-align: center; color: #777;">
+          <div style="font-size: 3rem; margin-bottom: 12px;">📂</div>
+          <h3 style="color:#aaa; font-size:1.2rem; margin-bottom:8px;">Папка пока пуста</h3>
+          <p style="font-size:0.95rem; max-width:500px; margin:0 auto 20px;">
+            Вы можете скачать любой фильм или серию на диск, нажав кнопку <strong>«💾 Скачать на диск»</strong> в карточке фильма.
+          </p>
+          <button class="n-secondary-btn" onclick="openDownloadsFinder()" style="background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); color:#fff; padding:8px 18px; border-radius:4px; cursor:pointer;">
+            Открыть папку в Finder
+          </button>
+        </div>
+      `;
+      return;
+    }
+
+    downloadsGrid.innerHTML = items.map(it => `
+      <div class="download-card">
+        <div>
+          <div class="download-card-title">${escapeHtml(it.title)}</div>
+          <div class="download-card-meta">
+            <span>💾 ${it.size_str}</span>
+            <span style="margin-left: 10px; color: ${it.is_complete ? '#46d369' : '#e5a00d'};">
+              ${it.is_complete ? '✔ Скачан' : '⏳ Загрузка...'}
+            </span>
+          </div>
+        </div>
+        <div class="download-card-actions">
+          <button class="n-edition-play-btn" onclick="playLocalDownload('${escapeJs(it.filename)}', '${escapeJs(it.title)}')" style="flex: 2;">
+            ▶ Смотреть
+          </button>
+          <button class="n-secondary-btn" onclick="deleteDownloadedFile('${escapeJs(it.filename)}')" style="background: rgba(229,9,20,0.2); border: 1px solid rgba(229,9,20,0.4); color: #ff6b6b; padding: 6px 12px; border-radius: 4px; cursor: pointer;">
+            🗑
+          </button>
+        </div>
+      </div>
+    `).join('');
+  } catch (err) {
+    downloadsGrid.innerHTML = `<div style="grid-column: 1/-1; color: #ff6b6b; padding: 20px;">Ошибка загрузки: ${err.message}</div>`;
+  }
+}
+
+async function openDownloadsFinder() {
+  try {
+    await fetch('/api/downloads/open-folder', { method: 'POST' });
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function deleteDownloadedFile(filename) {
+  if (!confirm(`Удалить файл "${filename}" с диска?`)) return;
+  try {
+    await fetch(`/api/downloads/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+    loadDownloadsList();
+  } catch (e) {
+    alert('Ошибка удаления: ' + e.message);
+  }
+}
+
+function playLocalDownload(filename, title) {
+  const url = `/api/downloads/play/${encodeURIComponent(filename)}`;
+  netflixPlayerView.style.display = 'flex';
+  playerTitle.textContent = title || filename;
+  netflixVideo.src = url;
+  netflixVideo.muted = false;
+  netflixVideo.load();
+  netflixVideo.play().catch(e => console.log('Local play error:', e));
+}
+
+async function saveActiveMovieToDisk() {
+  const btn = document.getElementById('modalSaveDownloadBtn');
+  if (btn) btn.innerHTML = '⏳ Добавление...';
+
+  try {
+    const torrentHash = state.modalTorrentData?.hash || state.activeTorrentHash;
+    const fileId = state.modalTorrentData?.default_index || 1;
+    const rawTitle = state.activeMovie?.title || 'movie';
+    const filename = `${rawTitle.replace(/[/\\?%*:|"<>]/g, '_')}.mp4`;
+
+    const res = await fetch('/api/downloads/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        torrent_hash: torrentHash,
+        file_id: fileId,
+        filename: filename,
+        title: rawTitle
+      })
+    });
+    if (btn) btn.innerHTML = '✔ Загрузка начата';
+    setTimeout(() => { if (btn) btn.innerHTML = '💾 Скачать на диск'; }, 3000);
+    alert(`Фильм "${rawTitle}" добавлен в загрузки (~/Downloads/KinoFlix)! Вы можете найти его во вкладке «Загрузки».`);
+  } catch (err) {
+    if (btn) btn.innerHTML = '💾 Скачать на диск';
+    alert('Ошибка скачивания: ' + err.message);
+  }
 }
 
 function switchCategory(cat) {
@@ -1349,10 +1510,39 @@ function stopStatsPolling() {
   }
 }
 
-// Hotkeys
+// Hotkeys & TV Remote Navigation
 function setupKeyboardShortcuts() {
   document.addEventListener('keydown', (e) => {
-    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
+      if (e.key === 'Escape') document.activeElement.blur();
+      return;
+    }
+
+    // Smart TV Mode: Remote & Number keys handling
+    if (state.tvMode) {
+      if (netflixPlayerView.style.display !== 'flex' && movieDetailModal.style.display !== 'flex') {
+        if (e.key >= '0' && e.key <= '9') {
+          e.preventDefault();
+          handleTvNumberKey(e.key);
+          return;
+        }
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+          e.preventDefault();
+          handleTvArrowKey(e.key);
+          return;
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          handleTvEnter();
+          return;
+        }
+        if (e.key === 'Escape' || e.key === 'Backspace') {
+          e.preventDefault();
+          handleTvBack();
+          return;
+        }
+      }
+    }
 
     if (netflixPlayerView.style.display === 'flex') {
       switch (e.key.toLowerCase()) {
@@ -1411,6 +1601,13 @@ function setupKeyboardShortcuts() {
     } else if (movieDetailModal.style.display === 'flex') {
       if (e.key === 'Escape') {
         closeDetailModal();
+      } else if (e.key === '1' || e.key === 'Enter') {
+        playSelectedMovie();
+      } else if (e.key === '2' && state.modalTorrentData?.is_series) {
+        const firstEp = document.querySelector('.netflix-episode-card:first-child');
+        if (firstEp) firstEp.click();
+      } else if (e.key === '3') {
+        saveActiveMovieToDisk();
       }
     }
   });
@@ -1557,4 +1754,281 @@ function escapeHtml(str) {
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#039;');
+}
+
+// --- SMART TV MODE ENGINE (REMOTE / ARROWS / NUMBERS 0-9) ---
+function toggleTvMode() {
+  setTvMode(!state.tvMode);
+}
+
+function setTvMode(enable) {
+  state.tvMode = enable;
+  localStorage.setItem('kinoflix_tv_mode', enable ? 'true' : 'false');
+  document.body.classList.toggle('tv-mode', enable);
+
+  if (tvModeBtnText) {
+    tvModeBtnText.textContent = enable ? 'ТВ Активен' : 'Для ТВ';
+  }
+
+  if (enable) {
+    homeView.style.display = 'none';
+    searchResultsView.style.display = 'none';
+    if (downloadsView) downloadsView.style.display = 'none';
+    if (tvView) tvView.style.display = 'block';
+    refreshTvItems();
+  } else {
+    if (tvView) tvView.style.display = 'none';
+    goHome();
+  }
+}
+
+function switchTvCategory(cat) {
+  state.tvCategory = cat;
+  state.tvPageIndex = 0;
+  state.tvFocusIndex = 0;
+
+  document.querySelectorAll('.tv-tab').forEach(t => {
+    t.classList.toggle('active', t.getAttribute('onclick') && t.getAttribute('onclick').includes(cat));
+  });
+
+  refreshTvItems();
+}
+
+function refreshTvItems() {
+  if (!state.catalog) return;
+  const cats = state.catalog.categories || [];
+
+  let pool = [];
+  if (state.tvCategory === 'all') {
+    pool = cats.flatMap(c => c.items || []);
+  } else if (state.tvCategory === 'new') {
+    const newCat = cats.find(c => c.id === 'new_releases');
+    pool = newCat ? newCat.items : (cats[0]?.items || []);
+  } else if (state.tvCategory === 'series') {
+    pool = cats.flatMap(c => c.items || []).filter(item => item.is_series);
+  } else if (state.tvCategory === 'top100') {
+    const tCat = cats.find(c => c.id === 'top100');
+    pool = tCat ? tCat.items : [];
+  } else if (state.tvCategory === 'comedies') {
+    const cCat = cats.find(c => c.id === 'comedies');
+    pool = cCat ? cCat.items : [];
+  } else if (state.tvCategory === 'anime') {
+    const aCat = cats.find(c => c.id === 'anime');
+    pool = aCat ? aCat.items : [];
+  } else if (state.tvCategory === 'detectives') {
+    const dCat = cats.find(c => c.id === 'detectives');
+    pool = dCat ? dCat.items : [];
+  } else if (state.tvCategory === 'downloads') {
+    loadTvDownloads();
+    return;
+  }
+
+  // Deduplicate items by title
+  const seenTitles = new Set();
+  const deduped = [];
+  for (const it of pool) {
+    if (it && it.title && !seenTitles.has(it.title)) {
+      seenTitles.add(it.title);
+      deduped.push(it);
+    }
+  }
+
+  state.tvItems = deduped;
+  renderTvCards();
+}
+
+async function loadTvDownloads() {
+  try {
+    const res = await fetch('/api/downloads/list');
+    const data = await res.json();
+    state.tvItems = (data.items || []).map(d => ({
+      id: d.filename,
+      title: d.title,
+      is_download: true,
+      size: d.size_str,
+      filename: d.filename,
+      stream_url: d.stream_url,
+      poster: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=600&q=80',
+      backdrop: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1280&q=80',
+      quality: 'HD',
+      rating: '10',
+      match: '100%'
+    }));
+    renderTvCards();
+  } catch (e) {
+    state.tvItems = [];
+    renderTvCards();
+  }
+}
+
+function renderTvCards() {
+  const total = state.tvItems.length;
+  const maxPages = Math.max(1, Math.ceil(total / 10));
+  if (state.tvPageIndex >= maxPages) state.tvPageIndex = maxPages - 1;
+  if (state.tvPageIndex < 0) state.tvPageIndex = 0;
+
+  // At most 10 items for the current page (guaranteed!)
+  const pageItems = state.tvItems.slice(state.tvPageIndex * 10, (state.tvPageIndex + 1) * 10);
+
+  if (tvPageInfo) {
+    tvPageInfo.textContent = `Страница ${state.tvPageIndex + 1} из ${maxPages} (${total} вариантов)`;
+  }
+
+  if (pageItems.length === 0) {
+    tvCardsGrid.innerHTML = '<div style="grid-column: 1/-1; padding: 40px; text-align: center; color: #888; font-size: 1.2rem;">Элементы не найдены. Нажмите [9] для поиска.</div>';
+    return;
+  }
+
+  if (state.tvFocusIndex >= pageItems.length) {
+    state.tvFocusIndex = pageItems.length - 1;
+  }
+  if (state.tvFocusIndex < 0) state.tvFocusIndex = 0;
+
+  tvCardsGrid.innerHTML = pageItems.map((item, idx) => {
+    // Numbers: [1], [2], [3], [4], [5], [6], [7], [8], [9], [0]
+    const badgeNum = (idx + 1) % 10;
+    const isFocused = (idx === state.tvFocusIndex);
+    return `
+      <div class="tv-card ${isFocused ? 'tv-focused' : ''}" id="tvCard_${idx}" onclick="handleTvCardClick(${idx})">
+        <div class="tv-card-thumb-wrap">
+          <div class="tv-card-num-badge">[${badgeNum}]</div>
+          <img src="${item.backdrop || item.poster}" alt="${escapeHtml(item.title)}" class="tv-card-img" onerror="this.onerror=null; this.src=generateCardSvg('${escapeJs(item.title)}', '${item.year || ''}', '${item.quality || 'HD'}');">
+        </div>
+        <div class="tv-card-body">
+          <div class="tv-card-title">${escapeHtml(item.title)}</div>
+          <div class="tv-card-meta">
+            <span class="tv-card-rating">★ ${item.rating || '8.8'}</span>
+            <span>${item.year || '2024'}</span>
+            <span class="quality-badge">${item.quality || 'HD'}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  updateTvFocus();
+}
+
+function updateTvFocus() {
+  document.querySelectorAll('.tv-card').forEach((c, idx) => {
+    c.classList.toggle('tv-focused', idx === state.tvFocusIndex);
+  });
+  const focusedCard = document.getElementById(`tvCard_${state.tvFocusIndex}`);
+  if (focusedCard) {
+    focusedCard.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+  }
+}
+
+function handleTvCardClick(idx) {
+  const pageItems = state.tvItems.slice(state.tvPageIndex * 10, (state.tvPageIndex + 1) * 10);
+  const item = pageItems[idx];
+  if (!item) return;
+
+  state.tvFocusIndex = idx;
+  updateTvFocus();
+
+  if (item.is_download) {
+    playLocalDownload(item.filename, item.title);
+  } else {
+    openMovieDetails(item);
+  }
+}
+
+function handleTvNumberKey(key) {
+  let targetIdx = -1;
+  if (key >= '1' && key <= '9') {
+    targetIdx = parseInt(key) - 1;
+  } else if (key === '0') {
+    targetIdx = 9;
+  }
+
+  const pageItems = state.tvItems.slice(state.tvPageIndex * 10, (state.tvPageIndex + 1) * 10);
+
+  if (targetIdx >= 0 && targetIdx < pageItems.length) {
+    handleTvCardClick(targetIdx);
+  } else if (key === '0') {
+    setTvMode(false);
+  } else if (key === '7') {
+    tvPagePrev();
+  } else if (key === '8') {
+    tvPageNext();
+  } else if (key === '9') {
+    tvOpenSearchPrompt();
+  }
+}
+
+function handleTvArrowKey(key) {
+  const pageItems = state.tvItems.slice(state.tvPageIndex * 10, (state.tvPageIndex + 1) * 10);
+  if (!pageItems.length) return;
+
+  const cols = (window.innerWidth <= 1200) ? 2 : 5;
+
+  if (key === 'ArrowRight') {
+    state.tvFocusIndex = (state.tvFocusIndex + 1) % pageItems.length;
+  } else if (key === 'ArrowLeft') {
+    state.tvFocusIndex = (state.tvFocusIndex - 1 + pageItems.length) % pageItems.length;
+  } else if (key === 'ArrowDown') {
+    if (state.tvFocusIndex + cols < pageItems.length) {
+      state.tvFocusIndex += cols;
+    } else {
+      tvPageNext();
+      return;
+    }
+  } else if (key === 'ArrowUp') {
+    if (state.tvFocusIndex - cols >= 0) {
+      state.tvFocusIndex -= cols;
+    } else {
+      tvPagePrev();
+      return;
+    }
+  }
+
+  updateTvFocus();
+}
+
+function handleTvEnter() {
+  handleTvCardClick(state.tvFocusIndex);
+}
+
+function handleTvBack() {
+  if (netflixPlayerView.style.display === 'flex') {
+    exitNetflixPlayer();
+  } else if (movieDetailModal.style.display === 'flex') {
+    closeDetailModal();
+  } else if (state.tvPageIndex > 0) {
+    tvPagePrev();
+  } else if (state.tvCategory !== 'all') {
+    switchTvCategory('all');
+  } else {
+    setTvMode(false);
+  }
+}
+
+function tvPageNext() {
+  const total = state.tvItems.length;
+  const maxPages = Math.ceil(total / 10);
+  if (state.tvPageIndex < maxPages - 1) {
+    state.tvPageIndex++;
+    state.tvFocusIndex = 0;
+    renderTvCards();
+  }
+}
+
+function tvPagePrev() {
+  if (state.tvPageIndex > 0) {
+    state.tvPageIndex--;
+    state.tvFocusIndex = 0;
+    renderTvCards();
+  }
+}
+
+function tvOpenSearchPrompt() {
+  const q = prompt('Введите название фильма или сериала для поиска:');
+  if (q && q.trim()) {
+    performSearch(q.trim());
+    if (state.tvMode) {
+      searchResultsView.style.display = 'block';
+      if (tvView) tvView.style.display = 'none';
+    }
+  }
 }
