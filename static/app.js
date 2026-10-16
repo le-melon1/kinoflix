@@ -54,7 +54,7 @@ const tvTabsBar = document.getElementById('tvTabsBar');
 // Billboard DOM
 const billboardImg = document.getElementById('billboardImg');
 const billboardTitle = document.getElementById('billboardTitle');
-const billboardMatch = document.getElementById('billboardMatch');
+const billboardRating = document.getElementById('billboardRating');
 const billboardYear = document.getElementById('billboardYear');
 const billboardAge = document.getElementById('billboardAge');
 const billboardDuration = document.getElementById('billboardDuration');
@@ -67,7 +67,7 @@ const rowsContainer = document.getElementById('rowsContainer');
 const movieDetailModal = document.getElementById('movieDetailModal');
 const modalBackdrop = document.getElementById('modalBackdrop');
 const modalTitle = document.getElementById('modalTitle');
-const modalMatch = document.getElementById('modalMatch');
+const modalRatingBadge = document.getElementById('modalRatingBadge');
 const modalYear = document.getElementById('modalYear');
 const modalAge = document.getElementById('modalAge');
 const modalQuality = document.getElementById('modalQuality');
@@ -270,7 +270,7 @@ function renderBillboard(item) {
   billboardImg.onerror = () => { billboardImg.src = generateCardSvg(item.title, item.year, item.quality); };
   billboardImg.src = item.backdrop;
   billboardTitle.textContent = item.title.toUpperCase();
-  billboardMatch.textContent = item.match || '98% совпадение';
+  if (billboardRating) billboardRating.textContent = '★ ' + (item.rating || '8.8');
   billboardYear.textContent = item.year || '2024';
   billboardAge.textContent = item.age || '16+';
   billboardDuration.textContent = item.duration || '2 ч 15 мин';
@@ -287,7 +287,8 @@ function renderCardHtml(item) {
       <div class="card-overlay-hover">
         <div class="card-title-mini">${escapeHtml(item.title)}</div>
         <div class="card-meta-mini">
-          <span style="color:var(--match-green); font-weight:700;">${item.match || '98%'}</span>
+          <span style="color: #ffcc00; font-weight: 700;">★ ${item.rating || '8.5'}</span>
+          <span style="color: #bbb; font-weight: 600; font-size: 0.85rem;">${item.year || ''}</span>
           <span class="age-badge">${item.age || '16+'}</span>
           <span class="quality-badge">${item.quality || 'HD'}</span>
         </div>
@@ -728,7 +729,7 @@ async function openMovieDetails(movie) {
   modalBackdrop.onerror = () => { modalBackdrop.src = generateCardSvg(movie.title, movie.year, movie.quality); };
   modalBackdrop.src = movie.backdrop || movie.poster;
   modalTitle.textContent = movie.title;
-  modalMatch.textContent = movie.match || '98% совпадение';
+  if (modalRatingBadge) modalRatingBadge.textContent = '★ ' + (movie.rating || '8.8');
   modalYear.textContent = movie.year || '2024';
   modalAge.textContent = movie.age || '16+';
   modalQuality.textContent = movie.quality || 'Ultra HD 4K';
