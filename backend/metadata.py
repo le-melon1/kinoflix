@@ -434,9 +434,30 @@ def curate_verified_editions(results: List[Dict[str, Any]], min_seeds: int = 3) 
     is_series_search = any(r.get("season_label") or r.get("is_series") for r in healthy)
 
     if is_series_search:
-        # 1. Look for multi-season complete pack (e.g. S01-02, S01-04)
+        # Check if 4K UHD release exists for the series
+        series_4k = None
+        for r in healthy:
+            t_up = r["title"].upper()
+            if "2160P" in t_up or "4K" in t_up or "UHD" in t_up:
+                if not series_4k or r.get("seeds", 0) > series_4k.get("seeds", 0):
+                    series_4k = r
+
+        if series_4k and series_4k.get("seeds", 0) >= 1:
+            s_lbl = series_4k.get("season_label", "Все сезоны")
+            verified.append(make_curated(
+                series_4k,
+                badge=f"👑 4K ULTRA HD ({series_4k.get('seeds', 0)} сидов)",
+                category_name=f"4K Ultra HD • {s_lbl}",
+                desc="Высшая чёткость 4K HDR и объёмный многоканальный звук.",
+                stars=9.9
+            ))
+            used_ids.add(series_4k["id"])
+
+        # Look for multi-season complete pack or top 1080p release
         multi_pack = None
         for r in healthy:
+            if r["id"] in used_ids:
+                continue
             if r.get("is_multi_season"):
                 if not multi_pack or r.get("seeds", 0) > multi_pack.get("seeds", 0):
                     multi_pack = r
@@ -444,16 +465,16 @@ def curate_verified_editions(results: List[Dict[str, Any]], min_seeds: int = 3) 
         if multi_pack and multi_pack["id"] not in used_ids:
             verified.append(make_curated(
                 multi_pack,
-                badge=f"⭐ ВСЕ СЕЗОНЫ ({multi_pack.get('seeds', 0)} сидов)",
-                category_name=f"{multi_pack.get('season_label', 'Все сезоны')} (Полный пак)",
-                desc=f"Все сезоны и серии в одной раздаче. Удобный выбор серий любого сезона.",
-                stars=9.9
+                badge=f"💎 FULL HD 1080p ({multi_pack.get('seeds', 0)} сидов)",
+                category_name=f"{multi_pack.get('season_label', 'Все сезоны')} (Full HD 1080p)",
+                desc="Все сезоны и серии в эталонном качестве Full HD 1080p с русской озвучкой.",
+                stars=9.8
             ))
             used_ids.add(multi_pack["id"])
 
-        # 2. Look for Latest Season (e.g. Season 2 for Arcane, Season 4 for The Boys)
-        max_s = max([r.get("season_end") or 1 for r in healthy if r.get("season_end")], default=1)
-        if max_s > 1:
+        # If we need another option, look for Latest Season (e.g. S02) or Season 1 in 1080p
+        if len(verified) < 2:
+            max_s = max([r.get("season_end") or 1 for r in healthy if r.get("season_end")], default=1)
             latest_rel = None
             for r in healthy:
                 if r["id"] in used_ids:
@@ -467,35 +488,16 @@ def curate_verified_editions(results: List[Dict[str, Any]], min_seeds: int = 3) 
                 yr_lbl = latest_rel.get("display_year", "2024")
                 verified.append(make_curated(
                     latest_rel,
-                    badge=f"🔥 {s_lbl.upper()} ({latest_rel.get('seeds', 0)} сидов) • Новинка",
-                    category_name=f"{s_lbl} ({yr_lbl})",
-                    desc=f"Самый свежий сезон в высоком качестве Full HD с русской озвучкой.",
+                    badge=f"🔥 {s_lbl.upper()} 1080p ({latest_rel.get('seeds', 0)} сидов)",
+                    category_name=f"{s_lbl} ({yr_lbl}) 1080p",
+                    desc="Самый свежий сезон в высоком качестве Full HD с русской озвучкой.",
                     stars=9.8
                 ))
                 used_ids.add(latest_rel["id"])
 
-        # 3. Look for Season 1 (Start of the story)
-        s1_rel = None
+        # Fill up to 2 with other top releases if needed
         for r in healthy:
-            if r["id"] in used_ids:
-                continue
-            if r.get("season_start") == 1 and not r.get("is_multi_season"):
-                if not s1_rel or r.get("seeds", 0) > s1_rel.get("seeds", 0):
-                    s1_rel = r
-
-        if s1_rel and s1_rel["id"] not in used_ids:
-            verified.append(make_curated(
-                s1_rel,
-                badge=f"💎 СЕЗОН 1 ({s1_rel.get('seeds', 0)} сидов)",
-                category_name="Сезон 1 (Full HD 1080p)",
-                desc=f"Первый сезон в эталонном качестве Full HD 1080p.",
-                stars=9.7
-            ))
-            used_ids.add(s1_rel["id"])
-
-        # 4. Fill up to 4 with other top releases (alternative dubbing / 4K / popular releases)
-        for r in healthy:
-            if r["id"] not in used_ids and len(verified) < 4:
+            if r["id"] not in used_ids and len(verified) < 2:
                 lbl = r.get("season_label") or r.get("quality", "HD")
                 verified.append(make_curated(
                     r,
@@ -506,63 +508,26 @@ def curate_verified_editions(results: List[Dict[str, Any]], min_seeds: int = 3) 
                 ))
                 used_ids.add(r["id"])
 
-        return verified
+        return verified[:2]
 
-    # Fallback to standard movie curation:
-    # 1. Look for best 1080p BDRip with Dubbing and high seeds (Optimal default for web player)
-    best_1080p = None
-    for r in healthy:
-        t_up = r["title"].upper()
-        if "1080P" in t_up or "BDRIP" in t_up:
-            if not best_1080p or r.get("seeds", 0) > best_1080p.get("seeds", 0):
-                best_1080p = r
-
-    if best_1080p and best_1080p.get("seeds", 0) >= 1:
-        verified.append(make_curated(
-            best_1080p,
-            badge=f"💎 ЗОЛОТОЙ СТАНДАРТ ({best_1080p.get('seeds', 0)} сидов)",
-            category_name="Идеальный Full HD 1080p",
-            desc="Оптимальный баланс качества Blu-ray и скорости. Профессиональный дубляж, без задержек.",
-            stars=9.8
-        ))
-        used_ids.add(best_1080p["id"])
-
-    # 2. Look for Fast / Compact release (WEB-DL / 720p / small 1080p)
-    fast_release = None
-    for r in healthy:
-        if r["id"] in used_ids:
-            continue
-        s_str = r.get("size", "")
-        if "MB" in s_str or "МБ" in s_str or ("GB" in s_str and any(s_str.startswith(x) for x in ["1.", "2.", "3.", "4."])):
-            if not fast_release or r.get("seeds", 0) > fast_release.get("seeds", 0):
-                fast_release = r
-
-    if not fast_release:
-        # Pick highest seed count remaining
-        for r in healthy:
-            if r["id"] not in used_ids:
-                fast_release = r
-                break
-
-    if fast_release and fast_release["id"] not in used_ids and fast_release.get("seeds", 0) >= 1:
-        verified.append(make_curated(
-            fast_release,
-            badge=f"⚡ БЫСТРЫЙ СТАРТ ({fast_release.get('seeds', 0)} сидов)",
-            category_name="Мгновенный просмотр (WEB-DL)",
-            desc="Компактный размер для стабильного воспроизведения даже при слабом интернет-соединении.",
-            stars=9.7
-        ))
-        used_ids.add(fast_release["id"])
-
-    # 3. Look for 4K UHD release with sufficient seeds
+    # Fallback to standard movie curation (strictly 2 options: 4K and 1080p):
+    # 1. Look for 4K UHD release with sufficient seeds
     best_4k = None
     for r in healthy:
-        if r["id"] in used_ids:
-            continue
         t_up = r["title"].upper()
         if "2160P" in t_up or "4K" in t_up or "UHD" in t_up:
             if not best_4k or r.get("seeds", 0) > best_4k.get("seeds", 0):
                 best_4k = r
+
+    # 2. Look for best 1080p BDRip with Dubbing and high seeds
+    best_1080p = None
+    for r in healthy:
+        if best_4k and r["id"] == best_4k["id"]:
+            continue
+        t_up = r["title"].upper()
+        if "1080P" in t_up or "BDRIP" in t_up:
+            if not best_1080p or r.get("seeds", 0) > best_1080p.get("seeds", 0):
+                best_1080p = r
 
     if best_4k and best_4k.get("seeds", 0) >= 1:
         verified.append(make_curated(
@@ -574,24 +539,30 @@ def curate_verified_editions(results: List[Dict[str, Any]], min_seeds: int = 3) 
         ))
         used_ids.add(best_4k["id"])
 
-    # 4. Alternative Dubbing or Series Edition (Red Head Sound, LostFilm, HDRezka)
-    alt_release = None
-    for r in healthy:
-        if r["id"] in used_ids:
-            continue
-        t_low = r["title"].lower()
-        if any(v in t_low for v in ["red head sound", "rhs", "lostfilm", "hdrezka", "кубик в кубе", "сыендук"]):
-            if not alt_release or r.get("seeds", 0) > alt_release.get("seeds", 0):
-                alt_release = r
-
-    if alt_release and alt_release["id"] not in used_ids and alt_release.get("seeds", 0) >= 1:
+    if best_1080p and best_1080p.get("seeds", 0) >= 1:
         verified.append(make_curated(
-            alt_release,
-            badge=f"🎙 ТОП ОЗВУЧКА ({alt_release.get('seeds', 0)} сидов)",
-            category_name="Авторский дубляж / Озвучка",
-            desc=f"Популярная студийная озвучка ({alt_release.get('audio', 'Студийный перевод')}).",
-            stars=9.6
+            best_1080p,
+            badge=f"💎 FULL HD 1080p ({best_1080p.get('seeds', 0)} сидов)",
+            category_name="Идеальный Full HD 1080p",
+            desc="Оптимальный баланс качества Blu-ray и скорости. Профессиональный дубляж, мгновенный запуск.",
+            stars=9.8
         ))
-        used_ids.add(alt_release["id"])
+        used_ids.add(best_1080p["id"])
 
-    return verified
+    # If either 4K or 1080p is not available, fill up to 2 with next best healthy releases
+    if len(verified) < 2:
+        for r in healthy:
+            if r["id"] not in used_ids and r.get("seeds", 0) >= 1:
+                q_lbl = r.get("quality", "HD")
+                verified.append(make_curated(
+                    r,
+                    badge=f"⚡ {q_lbl.upper()} ({r.get('seeds', 0)} сидов)",
+                    category_name=r.get("display_title", r.get("title")),
+                    desc=f"Компактный размер ({r.get('size')}), стабильный стрим и русская озвучка.",
+                    stars=9.6
+                ))
+                used_ids.add(r["id"])
+                if len(verified) >= 2:
+                    break
+
+    return verified[:2]

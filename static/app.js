@@ -1151,7 +1151,7 @@ function openTorrentReleaseModal(item) {
 }
 
 function renderModalEditions(verifiedList, allList) {
-  const list = verifiedList.length ? verifiedList : (allList || []).slice(0, 4);
+  const list = (verifiedList && verifiedList.length) ? verifiedList.slice(0, 2) : (allList || []).slice(0, 2);
 
   if (!list.length) {
     modalEditionsList.innerHTML = '<div style="color:#888; padding:20px; text-align:center;">Раздачи с активными сидами не найдены.<br><small>Попробуйте уточнить название или проверьте статус сети.</small></div>';
