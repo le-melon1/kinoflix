@@ -258,96 +258,87 @@ async def enrich_search_results(results: List[Dict[str, Any]]) -> List[Dict[str,
 
     return results
 
-COMMON_ALIASES = {
-    "arcane": "Аркейн",
-    "аркейн": "Arcane",
-    "fallout": "Фоллаут",
-    "фоллаут": "Fallout",
-    "сегун": "Сёгун",
-    "сёгун": "Shogun",
-    "shogun": "Сёгун",
-    "the boys": "Пацаны",
-    "пацаны": "The Boys",
-    "пингвин": "Пингвин",
-    "the penguin": "Пингвин",
-    "субстанция": "Субстанция",
-    "the substance": "Субстанция",
-    "рик и морти": "Рик и Морти",
-    "rick and morty": "Рик и Морти",
-    "игра престолов": "Игра престолов",
-    "game of thrones": "Игра престолов",
-    "дом дракона": "Дом Дракона",
-    "house of the dragon": "Дом Дракона",
-    "одни из нас": "Одни из нас",
-    "the last of us": "Одни из нас",
-    "во все тяжкие": "Во все тяжкие",
-    "breaking bad": "Во все тяжкие",
-    "очень странные дела": "Очень странные дела",
-    "stranger things": "Очень странные дела",
-    "атака титанов": "Атака титанов",
-    "attack on titan": "Атака титанов",
-    "клинок рассекающий демонов": "Клинок, рассекающий демонов",
-    "demon slayer": "Клинок, рассекающий демонов",
-    "человек бензопила": "Человек-бензопила",
-    "chainsaw man": "Человек-бензопила",
-    "магическая битва": "Магическая битва",
-    "jujutsu kaisen": "Магическая битва",
-    "соло левелинг": "Поднятие уровня в одиночку",
-    "solo leveling": "Поднятие уровня в одиночку",
-    "укрытие": "Укрытие",
-    "silo": "Укрытие",
-    "разделение": "Разделение",
-    "severance": "Разделение",
-    "дюна 2": "Дюна: Часть вторая",
-    "дюна часть 2": "Дюна: Часть вторая",
-    "dune 2": "Dune: Part Two",
-    "аватар 2": "Аватар: Путь воды",
-    "avatar 2": "Avatar: The Way of Water",
-    "дэдпул 3": "Дэдпул и Росомаха",
-    "deadpool 3": "Deadpool & Wolverine",
-    "топ ган 2": "Топ Ган: Мэверик",
-    "top gun 2": "Top Gun: Maverick",
-    "гладиатор 2": "Гладиатор 2",
-    "gladiator 2": "Gladiator II",
-    "чужой 7": "Чужой: Ромул",
-    "чужой ромул": "Чужой: Ромул",
-    "alien 7": "Alien: Romulus",
-    "alien romulus": "Alien: Romulus",
-    "безумный макс фуриоса": "Фуриоса: Хроники Безумного Макса",
-    "фуриоса": "Фуриоса: Хроники Безумного Макса",
-    "планета обезьян 4": "Планета обезьян: Новое царство",
-    "тихое место 3": "Тихое место: День первый",
-    "тихое место день первый": "Тихое место: День первый",
-    "джокер 2": "Джокер: Безумие на двоих",
-    "joker 2": "Joker: Folie a Deux",
-}
+_online_title_cache: Dict[str, Dict[str, Any]] = {}
+
+async def resolve_movie_online(query: str) -> Dict[str, Any]:
+    """
+    Automatically queries online databases (TMDB) to dynamically discover
+    the canonical Russian title, original title, release year, poster, and overview.
+    NO static or hardcoded dictionaries!
+    """
+    clean = query.strip()
+    c_key = clean.lower()
+    if c_key in _online_title_cache:
+        return _online_title_cache[c_key]
+
+    ru_title = clean
+    orig_title = clean
+    year_val = None
+    poster_url = None
+    backdrop_url = None
+    rating_val = None
+    plot_val = ""
+    is_tv = False
+
+    try:
+        async with httpx.AsyncClient(timeout=3.5) as client:
+            tmdb_url = f"https://api.themoviedb.org/3/search/multi?api_key=1cf50e6248dc270629e802686245c2c8&query={urllib.parse.quote(clean)}&language=ru-RU"
+            r = await client.get(tmdb_url)
+            if r.status_code == 200:
+                data = r.json()
+                results = data.get("results", [])
+                if results:
+                    top = results[0]
+                    ru_title = top.get("title") or top.get("name") or clean
+                    orig_title = top.get("original_title") or top.get("original_name") or ru_title
+                    rel_date = top.get("release_date") or top.get("first_air_date") or ""
+                    year_val = rel_date[:4] if len(rel_date) >= 4 else None
+                    is_tv = top.get("media_type") == "tv"
+                    p_path = top.get("poster_path")
+                    b_path = top.get("backdrop_path")
+                    if p_path:
+                        poster_url = f"https://image.tmdb.org/t/p/w780{p_path}"
+                    if b_path:
+                        backdrop_url = f"https://image.tmdb.org/t/p/w1280{b_path}"
+                    rating_val = str(round(top.get("vote_average", 8.0), 1))
+                    plot_val = top.get("overview") or ""
+    except Exception as e:
+        print(f"TMDB online title lookup notice: {e}")
+
+    # Generate prioritized search terms dynamically
+    terms = []
+    if ru_title:
+        terms.append(ru_title)
+    if orig_title and orig_title.lower() != ru_title.lower():
+        terms.append(orig_title)
+    if clean.lower() not in [t.lower() for t in terms]:
+        terms.append(clean)
+
+    # Sequel number pattern (e.g. 2 -> Часть вторая)
+    m_seq = re.match(r'^(.*?)\s*2$', clean, re.IGNORECASE)
+    if m_seq:
+        base = m_seq.group(1).strip()
+        terms.append(f"{base}: Часть вторая")
+
+    res = {
+        "query": clean,
+        "ru_title": ru_title,
+        "orig_title": orig_title,
+        "year": year_val,
+        "poster": poster_url or backdrop_url,
+        "backdrop": backdrop_url or poster_url,
+        "rating": rating_val or "8.5",
+        "overview": plot_val,
+        "is_series": is_tv,
+        "search_terms": terms
+    }
+    _online_title_cache[c_key] = res
+    return res
 
 def normalize_movie_query(query: str) -> List[str]:
-    """
-    Returns prioritized list of query variants to search trackers for maximum seeds.
-    e.g. 'Дюна 2' -> ['Дюна: Часть вторая', 'Дюна 2']
-    """
-    q_clean = query.strip().lower()
-    variants = []
-    
-    if q_clean in COMMON_ALIASES:
-        variants.append(COMMON_ALIASES[q_clean])
-    
-    # Sequel pattern: e.g. "Фильм 2" -> "Фильм: Часть вторая"
-    m = re.match(r'^(.*?)\s*2$', q_clean)
-    if m:
-        base = m.group(1).strip()
-        variants.extend([f"{base}: Часть вторая", f"{base} Часть 2"])
-
-    variants.append(query.strip())
-    # Deduplicate keeping order
-    seen = set()
-    result = []
-    for v in variants:
-        if v.lower() not in seen:
-            seen.add(v.lower())
-            result.append(v)
-    return result
+    """Synchronous fallback search terms generator"""
+    clean = query.strip()
+    return [clean]
 
 def curate_verified_editions(results: List[Dict[str, Any]], min_seeds: int = 3) -> List[Dict[str, Any]]:
     """

@@ -220,6 +220,11 @@ async function loadCatalog() {
     const res = await fetch('/api/catalog');
     state.catalog = await res.json();
 
+    if (state.catalog.genres) {
+      renderGenreFilterBar(state.catalog.genres);
+      renderTvTabs(state.catalog.genres);
+    }
+
     if (state.tvMode) {
       refreshTvItems();
     } else {
@@ -233,6 +238,31 @@ async function loadCatalog() {
   } catch (err) {
     console.error('Catalog load error:', err);
   }
+}
+
+function renderGenreFilterBar(genres) {
+  const bar = document.getElementById('genreFilterBar');
+  if (!bar || !genres) return;
+  bar.innerHTML = genres.map(g => `
+    <button class="genre-pill ${g.id === 'all' ? 'active' : ''}" data-genre="${g.id}" onclick="switchCategory('${g.id}')">
+      <span>${g.icon || '🎬'}</span>
+      <span>${escapeHtml(g.name)}</span>
+    </button>
+  `).join('');
+}
+
+function renderTvTabs(genres) {
+  const bar = document.getElementById('tvTabsBar');
+  if (!bar || !genres) return;
+  const list = [...genres];
+  if (!list.find(i => i.id === 'downloads')) {
+    list.push({ id: 'downloads', name: 'Загрузки', icon: '💾' });
+  }
+  bar.innerHTML = list.map(g => `
+    <button class="tv-tab ${g.id === state.tvCategory ? 'active' : ''}" data-tv-cat="${g.id}" onclick="switchTvCategory('${g.id}')">
+      ${g.icon || ''} ${escapeHtml(g.name)}
+    </button>
+  `).join('');
 }
 
 function renderBillboard(item) {
@@ -475,7 +505,7 @@ function switchCategory(cat) {
   if (cat === 'all' && links[0]) links[0].classList.add('active');
   if (cat === 'series' && links[1]) links[1].classList.add('active');
   if (cat === 'movies' && links[2]) links[2].classList.add('active');
-  if (cat === 'trending' && links[3]) links[3].classList.add('active');
+  if ((cat === 'trending' || cat === 'new_releases') && links[3]) links[3].classList.add('active');
 
   goHome();
 
@@ -503,10 +533,27 @@ function switchCategory(cat) {
   } else if (cat === 'trending') {
     filteredCats = cats.filter(c => c.id === 'trending' || c.is_top10);
     billboardItem = state.catalog.billboard;
-  } else {
+  } else if (cat === 'all') {
     filteredCats = cats;
     billboardItem = state.catalog.billboard;
+  } else {
+    // Exact genre ID match from ALL_GENRES
+    const matched = cats.find(c => c.id === cat);
+    if (matched) {
+      filteredCats = [matched];
+      if (matched.items && matched.items.length > 0) {
+        billboardItem = matched.items[0];
+      }
+    } else {
+      filteredCats = cats;
+      billboardItem = state.catalog.billboard;
+    }
   }
+
+  // Update active pill styling
+  document.querySelectorAll('.genre-pill').forEach(p => {
+    p.classList.toggle('active', p.getAttribute('data-genre') === cat);
+  });
 
   if (billboardItem) renderBillboard(billboardItem);
   renderRows(filteredCats);
@@ -1541,6 +1588,21 @@ function setupKeyboardShortcuts() {
           handleTvBack();
           return;
         }
+        if (e.key.toLowerCase() === 'n' || e.key === 'PageDown') {
+          e.preventDefault();
+          tvPageNext();
+          return;
+        }
+        if (e.key.toLowerCase() === 'p' || e.key === 'PageUp') {
+          e.preventDefault();
+          tvPagePrev();
+          return;
+        }
+        if (e.key.toLowerCase() === 's') {
+          e.preventDefault();
+          tvOpenSearchPrompt();
+          return;
+        }
       }
     }
 
@@ -1702,12 +1764,20 @@ async function submitRuTrackerCookie() {
 
 async function openSettingsModal() {
   document.getElementById('settingsModal').style.display = 'flex';
+  const uiSelect = document.getElementById('uiModeSelect');
+  if (uiSelect) {
+    uiSelect.value = state.tvMode ? 'tv' : 'desktop';
+  }
   try {
     const res = await fetch('/api/network/status');
     const net = await res.json();
     document.getElementById('netRtRoute').textContent = net.rutracker_routing;
     document.getElementById('netTorrentRoute').textContent = net.stream_routing;
   } catch (e) {}
+}
+
+function handleUiModeChange(val) {
+  setTvMode(val === 'tv');
 }
 
 function closeSettingsModal() {
@@ -1770,6 +1840,11 @@ function setTvMode(enable) {
     tvModeBtnText.textContent = enable ? 'ТВ Активен' : 'Для ТВ';
   }
 
+  const uiSelect = document.getElementById('uiModeSelect');
+  if (uiSelect) {
+    uiSelect.value = enable ? 'tv' : 'desktop';
+  }
+
   if (enable) {
     homeView.style.display = 'none';
     searchResultsView.style.display = 'none';
@@ -1788,7 +1863,7 @@ function switchTvCategory(cat) {
   state.tvFocusIndex = 0;
 
   document.querySelectorAll('.tv-tab').forEach(t => {
-    t.classList.toggle('active', t.getAttribute('onclick') && t.getAttribute('onclick').includes(cat));
+    t.classList.toggle('active', t.getAttribute('data-tv-cat') === cat);
   });
 
   refreshTvItems();
@@ -1801,26 +1876,22 @@ function refreshTvItems() {
   let pool = [];
   if (state.tvCategory === 'all') {
     pool = cats.flatMap(c => c.items || []);
-  } else if (state.tvCategory === 'new') {
+  } else if (state.tvCategory === 'new' || state.tvCategory === 'new_releases') {
     const newCat = cats.find(c => c.id === 'new_releases');
     pool = newCat ? newCat.items : (cats[0]?.items || []);
   } else if (state.tvCategory === 'series') {
     pool = cats.flatMap(c => c.items || []).filter(item => item.is_series);
-  } else if (state.tvCategory === 'top100') {
-    const tCat = cats.find(c => c.id === 'top100');
-    pool = tCat ? tCat.items : [];
-  } else if (state.tvCategory === 'comedies') {
-    const cCat = cats.find(c => c.id === 'comedies');
-    pool = cCat ? cCat.items : [];
-  } else if (state.tvCategory === 'anime') {
-    const aCat = cats.find(c => c.id === 'anime');
-    pool = aCat ? aCat.items : [];
-  } else if (state.tvCategory === 'detectives') {
-    const dCat = cats.find(c => c.id === 'detectives');
-    pool = dCat ? dCat.items : [];
   } else if (state.tvCategory === 'downloads') {
     loadTvDownloads();
     return;
+  } else {
+    // Dynamic match for all classic genres
+    const matched = cats.find(c => c.id === state.tvCategory);
+    if (matched) {
+      pool = matched.items || [];
+    } else {
+      pool = cats.flatMap(c => c.items || []);
+    }
   }
 
   // Deduplicate items by title
@@ -1875,7 +1946,7 @@ function renderTvCards() {
   }
 
   if (pageItems.length === 0) {
-    tvCardsGrid.innerHTML = '<div style="grid-column: 1/-1; padding: 40px; text-align: center; color: #888; font-size: 1.2rem;">Элементы не найдены. Нажмите [9] для поиска.</div>';
+    tvCardsGrid.innerHTML = '<div style="grid-column: 1/-1; padding: 40px; text-align: center; color: #888; font-size: 1.2rem;">Элементы не найдены. Нажмите [S] для поиска.</div>';
     return;
   }
 
@@ -1948,12 +2019,6 @@ function handleTvNumberKey(key) {
     handleTvCardClick(targetIdx);
   } else if (key === '0') {
     setTvMode(false);
-  } else if (key === '7') {
-    tvPagePrev();
-  } else if (key === '8') {
-    tvPageNext();
-  } else if (key === '9') {
-    tvOpenSearchPrompt();
   }
 }
 

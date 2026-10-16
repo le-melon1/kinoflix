@@ -2051,3 +2051,50 @@ body.tv-mode .tv-mode-btn {
   gap: 10px;
 }
 
+/* --- DESKTOP GENRE FILTER BAR (22 GENRES) --- */
+.genre-filter-container {
+  padding: 10px 4% 16px;
+  position: relative;
+  z-index: 10;
+  margin-top: -24px;
+}
+.genre-filter-scroll {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding: 8px 4px 12px;
+}
+.genre-filter-scroll::-webkit-scrollbar {
+  display: none;
+}
+.genre-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #e5e5e5;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s cubic-bezier(0.165, 0.84, 0.44, 1);
+  user-select: none;
+}
+.genre-pill:hover {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.35);
+  transform: translateY(-2px);
+}
+.genre-pill.active {
+  background: var(--netflix-red);
+  color: #fff;
+  border-color: var(--netflix-red);
+  box-shadow: 0 4px 14px rgba(229, 9, 20, 0.45);
+}
+

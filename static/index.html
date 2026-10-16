@@ -55,6 +55,11 @@
         <span class="status-dot dot-gray" id="rtDot"></span>
         <span id="rtText">RuTracker</span>
       </div>
+
+      <!-- Settings Button -->
+      <button class="nav-pill" onclick="openSettingsModal()" title="Настройки системы, сети и режимов" style="padding: 6px 12px; cursor: pointer; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.5); color: #fff; border-radius: 20px;">
+        ⚙️ <span class="hide-mobile">Настройки</span>
+      </button>
     </div>
   </header>
 
@@ -109,6 +114,13 @@
           </div>
         </div>
       </section>
+
+      <!-- GENRE FILTER BAR (ВСЕ 22 ЖАНРА) -->
+      <div class="genre-filter-container" id="genreFilterContainer">
+        <div class="genre-filter-scroll" id="genreFilterBar">
+          <!-- Populated dynamically by app.js -->
+        </div>
+      </div>
 
       <!-- NETFLIX ROWS / CAROUSELS -->
       <section class="netflix-rows-container" id="rowsContainer">
@@ -182,9 +194,9 @@
 
       <!-- TV Navigation bottom bar -->
       <div class="tv-bottom-nav">
-        <button class="tv-nav-btn" id="tvPrevBtn" onclick="tvPagePrev()">◀ [7] Предыдущие 10</button>
-        <button class="tv-nav-btn" id="tvNextBtn" onclick="tvPageNext()">[8] Следующие 10 ▶</button>
-        <button class="tv-nav-btn" onclick="tvOpenSearchPrompt()">[9] 🔍 Поиск фильма</button>
+        <button class="tv-nav-btn" id="tvPrevBtn" onclick="tvPagePrev()">◀ Предыдущие 10 (P / PageUp)</button>
+        <button class="tv-nav-btn" id="tvNextBtn" onclick="tvPageNext()">Следующие 10 ▶ (N / PageDown)</button>
+        <button class="tv-nav-btn" onclick="tvOpenSearchPrompt()">🔍 Поиск фильма (S)</button>
       </div>
     </div>
 
@@ -563,6 +575,14 @@
             <option value="15000">15 МБ/с (быстро)</option>
             <option value="8000" selected>8 МБ/с (стабильно)</option>
             <option value="4000">4 МБ/с (для слабого интернета)</option>
+          </select>
+        </div>
+
+        <div class="n-input-group" style="margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.1);">
+          <label>📺 Режим отображения (для управления пультом или мышью):</label>
+          <select id="uiModeSelect" onchange="handleUiModeChange(this.value)">
+            <option value="desktop">Компьютер / Мышь (Стандартный Netflix)</option>
+            <option value="tv">Режим для ТВ (Пульт, цифры [1]–[0], стрелки)</option>
           </select>
         </div>
 
