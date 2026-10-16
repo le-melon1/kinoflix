@@ -28,7 +28,7 @@
 
     <div class="nav-right">
       <!-- TV Mode Button -->
-      <button class="tv-mode-btn" id="tvModeBtn" onclick="toggleTvMode()" title="Режим для ТВ (управление стрелками и цифрами)">
+      <button class="tv-mode-btn" id="tvModeBtn" onclick="toggleTvMode()" title="Режим для ТВ (управление стрелками D-Pad)">
         📺 <span id="tvModeBtnText">Для ТВ</span>
       </button>
 
@@ -163,29 +163,29 @@
       <div id="downloadsGrid" class="netflix-grid"></div>
     </div>
 
-    <!-- SMART TV VIEW (РЕЖИМ ДЛЯ ТВ С УПРАВЛЕНИЕМ СТРЕЛКАМИ И ЦИФРАМИ) -->
+    <!-- SMART TV VIEW (РЕЖИМ ДЛЯ ТВ С НАВИГАЦИЕЙ СТРЕЛКАМИ D-PAD) -->
     <div id="tvView" class="tv-view" style="display: none;">
       <div class="tv-banner">
         <div class="tv-banner-left">
           <span class="tv-badge">📺 РЕЖИМ ДЛЯ ТВ</span>
-          <span class="tv-instructions">Нажмите цифру <strong>[1]–[9], [0]</strong> или используйте <strong>Стрелки + Enter</strong> для выбора</span>
+          <span class="tv-instructions">Навигация: <strong>Стрелки</strong> • Выбор: <strong>Enter</strong></span>
         </div>
         <div class="tv-banner-right">
           <span class="tv-page-info" id="tvPageInfo">Страница 1</span>
-          <button class="tv-exit-btn" onclick="setTvMode(false)">[0] Выход из ТВ режима</button>
+          <button class="tv-exit-btn" id="tvExitBtn" onclick="setTvMode(false)">Выход из ТВ режима (Esc)</button>
         </div>
       </div>
 
       <!-- TV Category Pills -->
       <div class="tv-tabs-bar" id="tvTabsBar">
-        <button class="tv-tab active" onclick="switchTvCategory('all')">Все (Тренды)</button>
-        <button class="tv-tab" onclick="switchTvCategory('new')">🔥 Новинки</button>
-        <button class="tv-tab" onclick="switchTvCategory('series')">Сериалы</button>
-        <button class="tv-tab" onclick="switchTvCategory('top100')">🏆 Топ-100</button>
-        <button class="tv-tab" onclick="switchTvCategory('comedies')">😂 Комедии</button>
-        <button class="tv-tab" onclick="switchTvCategory('anime')">⛩️ Аниме</button>
-        <button class="tv-tab" onclick="switchTvCategory('detectives')">🔍 Детективы</button>
-        <button class="tv-tab" onclick="switchTvCategory('downloads')">💾 Загрузки</button>
+        <button class="tv-tab active" data-tv-cat="all" onclick="switchTvCategory('all')">Все (Тренды)</button>
+        <button class="tv-tab" data-tv-cat="new" onclick="switchTvCategory('new')">🔥 Новинки</button>
+        <button class="tv-tab" data-tv-cat="series" onclick="switchTvCategory('series')">Сериалы</button>
+        <button class="tv-tab" data-tv-cat="top100" onclick="switchTvCategory('top100')">🏆 Топ-100</button>
+        <button class="tv-tab" data-tv-cat="comedies" onclick="switchTvCategory('comedies')">😂 Комедии</button>
+        <button class="tv-tab" data-tv-cat="anime" onclick="switchTvCategory('anime')">⛩️ Аниме</button>
+        <button class="tv-tab" data-tv-cat="detectives" onclick="switchTvCategory('detectives')">🔍 Детективы</button>
+        <button class="tv-tab" data-tv-cat="downloads" onclick="switchTvCategory('downloads')">💾 Загрузки</button>
       </div>
 
       <!-- Exactly at most 10 items grid -->
@@ -193,9 +193,9 @@
 
       <!-- TV Navigation bottom bar -->
       <div class="tv-bottom-nav">
-        <button class="tv-nav-btn" id="tvPrevBtn" onclick="tvPagePrev()">◀ Предыдущие 10 (P / PageUp)</button>
-        <button class="tv-nav-btn" id="tvNextBtn" onclick="tvPageNext()">Следующие 10 ▶ (N / PageDown)</button>
-        <button class="tv-nav-btn" onclick="tvOpenSearchPrompt()">🔍 Поиск фильма (S)</button>
+        <button class="tv-nav-btn" id="tvPrevBtn" onclick="tvPagePrev()">◀ Предыдущая страница</button>
+        <button class="tv-nav-btn" id="tvNextBtn" onclick="tvPageNext()">Следующая страница ▶</button>
+        <button class="tv-nav-btn" id="tvSearchBtn" onclick="tvOpenSearchPrompt()">🔍 Поиск фильма</button>
       </div>
     </div>
 
@@ -581,7 +581,7 @@
           <label>📺 Режим отображения (для управления пультом или мышью):</label>
           <select id="uiModeSelect" onchange="handleUiModeChange(this.value)">
             <option value="desktop">Компьютер / Мышь (Стандартный Netflix)</option>
-            <option value="tv">Режим для ТВ (Пульт, цифры [1]–[0], стрелки)</option>
+            <option value="tv">Режим для ТВ (Пульт, навигация стрелками D-Pad)</option>
           </select>
         </div>
 

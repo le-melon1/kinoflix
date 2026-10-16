@@ -30,7 +30,10 @@ const state = {
   tvCategory: 'all',
   tvItems: [],
   tvPageIndex: 0,
-  tvFocusIndex: 0
+  tvZone: 'cards', // 'header' | 'tabs' | 'cards' | 'bottom'
+  tvFocusIndex: 0, // 0..9 index within cards grid
+  tvTabIndex: 0,   // active category tab index
+  tvBottomIndex: 1 // 0: prev, 1: next, 2: search
 };
 
 // DOM Elements
@@ -50,6 +53,10 @@ const tvCardsGrid = document.getElementById('tvCardsGrid');
 const tvPageInfo = document.getElementById('tvPageInfo');
 const tvModeBtnText = document.getElementById('tvModeBtnText');
 const tvTabsBar = document.getElementById('tvTabsBar');
+const tvExitBtn = document.getElementById('tvExitBtn');
+const tvPrevBtn = document.getElementById('tvPrevBtn');
+const tvNextBtn = document.getElementById('tvNextBtn');
+const tvSearchBtn = document.getElementById('tvSearchBtn');
 
 // Billboard DOM
 const billboardImg = document.getElementById('billboardImg');
@@ -1646,14 +1653,9 @@ function setupKeyboardShortcuts() {
       return;
     }
 
-    // Smart TV Mode: Remote & Number keys handling
+    // Smart TV Mode: Remote D-Pad Navigation (Arrow keys + Enter + Esc)
     if (state.tvMode) {
       if (netflixPlayerView.style.display !== 'flex' && movieDetailModal.style.display !== 'flex') {
-        if (e.key >= '0' && e.key <= '9') {
-          e.preventDefault();
-          handleTvNumberKey(e.key);
-          return;
-        }
         if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
           e.preventDefault();
           handleTvArrowKey(e.key);
@@ -1669,19 +1671,14 @@ function setupKeyboardShortcuts() {
           handleTvBack();
           return;
         }
-        if (e.key.toLowerCase() === 'n' || e.key === 'PageDown') {
+        if (e.key === 'PageDown') {
           e.preventDefault();
           tvPageNext();
           return;
         }
-        if (e.key.toLowerCase() === 'p' || e.key === 'PageUp') {
+        if (e.key === 'PageUp') {
           e.preventDefault();
           tvPagePrev();
-          return;
-        }
-        if (e.key.toLowerCase() === 's') {
-          e.preventDefault();
-          tvOpenSearchPrompt();
           return;
         }
       }
@@ -1931,6 +1928,9 @@ function setTvMode(enable) {
     searchResultsView.style.display = 'none';
     if (downloadsView) downloadsView.style.display = 'none';
     if (tvView) tvView.style.display = 'block';
+    state.tvZone = 'cards';
+    state.tvFocusIndex = 0;
+    state.tvBottomIndex = 1;
     refreshTvItems();
   } else {
     if (tvView) tvView.style.display = 'none';
@@ -1944,8 +1944,11 @@ function switchTvCategory(cat) {
   state.tvFocusIndex = 0;
   state.tvPageApi = 1;
 
-  document.querySelectorAll('.tv-tab').forEach(t => {
-    t.classList.toggle('active', t.getAttribute('data-tv-cat') === cat);
+  const tabs = document.querySelectorAll('#tvTabsBar .tv-tab');
+  tabs.forEach((t, idx) => {
+    const isMatch = (t.getAttribute('data-tv-cat') === cat);
+    t.classList.toggle('active', isMatch);
+    if (isMatch) state.tvTabIndex = idx;
   });
 
   refreshTvItems();
@@ -2027,24 +2030,32 @@ function renderTvCards() {
     tvPageInfo.textContent = `Страница ${state.tvPageIndex + 1} из ${maxPages} (${total} вариантов)`;
   }
 
+  const prevBtn = document.getElementById('tvPrevBtn');
+  if (prevBtn) {
+    prevBtn.style.opacity = (state.tvPageIndex === 0) ? '0.4' : '1';
+    prevBtn.style.pointerEvents = (state.tvPageIndex === 0) ? 'none' : 'auto';
+  }
+  const nextBtn = document.getElementById('tvNextBtn');
+  if (nextBtn) {
+    const isLast = (state.tvPageIndex >= maxPages - 1);
+    nextBtn.style.opacity = isLast ? '0.4' : '1';
+    nextBtn.style.pointerEvents = isLast ? 'none' : 'auto';
+  }
+
   if (pageItems.length === 0) {
-    tvCardsGrid.innerHTML = '<div style="grid-column: 1/-1; padding: 40px; text-align: center; color: #888; font-size: 1.2rem;">Элементы не найдены. Нажмите [S] для поиска.</div>';
+    tvCardsGrid.innerHTML = '<div style="grid-column: 1/-1; padding: 40px; text-align: center; color: #888; font-size: 1.2rem;">Элементы не найдены. Выберите другую категорию или выполните поиск.</div>';
     return;
   }
 
   if (state.tvFocusIndex >= pageItems.length) {
-    state.tvFocusIndex = pageItems.length - 1;
+    state.tvFocusIndex = Math.max(0, pageItems.length - 1);
   }
   if (state.tvFocusIndex < 0) state.tvFocusIndex = 0;
 
   tvCardsGrid.innerHTML = pageItems.map((item, idx) => {
-    // Numbers: [1], [2], [3], [4], [5], [6], [7], [8], [9], [0]
-    const badgeNum = (idx + 1) % 10;
-    const isFocused = (idx === state.tvFocusIndex);
     return `
-      <div class="tv-card ${isFocused ? 'tv-focused' : ''}" id="tvCard_${idx}" onclick="handleTvCardClick(${idx})">
+      <div class="tv-card" id="tvCard_${idx}" onclick="handleTvCardClick(${idx})">
         <div class="tv-card-thumb-wrap">
-          <div class="tv-card-num-badge">[${badgeNum}]</div>
           <img src="${item.backdrop || item.poster}" alt="${escapeHtml(item.title)}" class="tv-card-img" onerror="this.onerror=null; this.src=generateCardSvg('${escapeJs(item.title)}', '${item.year || ''}', '${item.quality || 'HD'}');">
         </div>
         <div class="tv-card-body">
@@ -2063,12 +2074,45 @@ function renderTvCards() {
 }
 
 function updateTvFocus() {
-  document.querySelectorAll('.tv-card').forEach((c, idx) => {
-    c.classList.toggle('tv-focused', idx === state.tvFocusIndex);
-  });
-  const focusedCard = document.getElementById(`tvCard_${state.tvFocusIndex}`);
-  if (focusedCard) {
-    focusedCard.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+  // Clear focus class from all elements across all TV zones
+  document.querySelectorAll('.tv-card').forEach(c => c.classList.remove('tv-focused'));
+  document.querySelectorAll('.tv-tab').forEach(t => t.classList.remove('tv-focused'));
+  const exitBtn = document.getElementById('tvExitBtn');
+  if (exitBtn) exitBtn.classList.remove('tv-focused');
+  const bottomBtns = [
+    document.getElementById('tvPrevBtn'),
+    document.getElementById('tvNextBtn'),
+    document.getElementById('tvSearchBtn')
+  ];
+  bottomBtns.forEach(b => { if (b) b.classList.remove('tv-focused'); });
+
+  if (state.tvZone === 'cards') {
+    const focusedCard = document.getElementById(`tvCard_${state.tvFocusIndex}`);
+    if (focusedCard) {
+      focusedCard.classList.add('tv-focused');
+      focusedCard.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
+  } else if (state.tvZone === 'tabs') {
+    const tabs = document.querySelectorAll('#tvTabsBar .tv-tab');
+    if (tabs.length > 0) {
+      if (state.tvTabIndex >= tabs.length) state.tvTabIndex = tabs.length - 1;
+      if (state.tvTabIndex < 0) state.tvTabIndex = 0;
+      tabs[state.tvTabIndex].classList.add('tv-focused');
+      tabs[state.tvTabIndex].scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
+  } else if (state.tvZone === 'header') {
+    if (exitBtn) {
+      exitBtn.classList.add('tv-focused');
+      exitBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
+  } else if (state.tvZone === 'bottom') {
+    if (state.tvBottomIndex < 0) state.tvBottomIndex = 0;
+    if (state.tvBottomIndex > 2) state.tvBottomIndex = 2;
+    const btn = bottomBtns[state.tvBottomIndex];
+    if (btn) {
+      btn.classList.add('tv-focused');
+      btn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
   }
 }
 
@@ -2077,6 +2121,7 @@ function handleTvCardClick(idx) {
   const item = pageItems[idx];
   if (!item) return;
 
+  state.tvZone = 'cards';
   state.tvFocusIndex = idx;
   updateTvFocus();
 
@@ -2087,54 +2132,152 @@ function handleTvCardClick(idx) {
   }
 }
 
-function handleTvNumberKey(key) {
-  let targetIdx = -1;
-  if (key >= '1' && key <= '9') {
-    targetIdx = parseInt(key) - 1;
-  } else if (key === '0') {
-    targetIdx = 9;
-  }
-
-  const pageItems = state.tvItems.slice(state.tvPageIndex * 10, (state.tvPageIndex + 1) * 10);
-
-  if (targetIdx >= 0 && targetIdx < pageItems.length) {
-    handleTvCardClick(targetIdx);
-  } else if (key === '0') {
-    setTvMode(false);
-  }
-}
-
 function handleTvArrowKey(key) {
   const pageItems = state.tvItems.slice(state.tvPageIndex * 10, (state.tvPageIndex + 1) * 10);
-  if (!pageItems.length) return;
-
   const cols = (window.innerWidth <= 1200) ? 2 : 5;
+  const N = pageItems.length;
+  const totalRows = Math.ceil(N / cols);
 
-  if (key === 'ArrowRight') {
-    state.tvFocusIndex = (state.tvFocusIndex + 1) % pageItems.length;
-  } else if (key === 'ArrowLeft') {
-    state.tvFocusIndex = (state.tvFocusIndex - 1 + pageItems.length) % pageItems.length;
-  } else if (key === 'ArrowDown') {
-    if (state.tvFocusIndex + cols < pageItems.length) {
-      state.tvFocusIndex += cols;
-    } else {
-      tvPageNext();
+  // ZONE: CARDS GRID
+  if (state.tvZone === 'cards') {
+    if (N === 0) {
+      if (key === 'ArrowUp') state.tvZone = 'tabs';
+      else if (key === 'ArrowDown') state.tvZone = 'bottom';
+      updateTvFocus();
       return;
     }
-  } else if (key === 'ArrowUp') {
-    if (state.tvFocusIndex - cols >= 0) {
-      state.tvFocusIndex -= cols;
-    } else {
-      tvPagePrev();
-      return;
+
+    const row = Math.floor(state.tvFocusIndex / cols);
+    const col = state.tvFocusIndex % cols;
+
+    if (key === 'ArrowLeft') {
+      if (state.tvFocusIndex > 0) {
+        state.tvFocusIndex--;
+      }
+    } else if (key === 'ArrowRight') {
+      if (state.tvFocusIndex < N - 1) {
+        state.tvFocusIndex++;
+      }
+    } else if (key === 'ArrowUp') {
+      if (row > 0) {
+        // Move up to previous row within cards
+        state.tvFocusIndex -= cols;
+      } else {
+        // Move UP from Row 1 into Category Tabs! (Never jumps page!)
+        state.tvZone = 'tabs';
+        const tabs = document.querySelectorAll('#tvTabsBar .tv-tab');
+        const activeIdx = Array.from(tabs).findIndex(t => t.classList.contains('active'));
+        state.tvTabIndex = (activeIdx >= 0) ? activeIdx : Math.min(col, tabs.length - 1);
+      }
+    } else if (key === 'ArrowDown') {
+      if (row < totalRows - 1) {
+        // Move down to next row within cards
+        const nextIdx = state.tvFocusIndex + cols;
+        state.tvFocusIndex = Math.min(nextIdx, N - 1);
+      } else {
+        // Move DOWN from Row 2 into Bottom Action Bar! (Never jumps page!)
+        state.tvZone = 'bottom';
+        if (col <= 1) {
+          state.tvBottomIndex = 0; // Prev
+        } else if (col <= 3) {
+          state.tvBottomIndex = 1; // Next
+        } else {
+          state.tvBottomIndex = 2; // Search
+        }
+      }
     }
+    updateTvFocus();
+    return;
   }
 
-  updateTvFocus();
+  // ZONE: CATEGORY TABS
+  if (state.tvZone === 'tabs') {
+    const tabs = document.querySelectorAll('#tvTabsBar .tv-tab');
+    const tabsCount = tabs.length;
+
+    if (key === 'ArrowLeft') {
+      if (state.tvTabIndex > 0) {
+        state.tvTabIndex--;
+      }
+    } else if (key === 'ArrowRight') {
+      if (state.tvTabIndex < tabsCount - 1) {
+        state.tvTabIndex++;
+      } else {
+        // Moving right from the last tab focuses the exit button
+        state.tvZone = 'header';
+      }
+    } else if (key === 'ArrowUp') {
+      // Move UP to Header (Exit button)
+      state.tvZone = 'header';
+    } else if (key === 'ArrowDown') {
+      // Move DOWN into cards (Row 1)
+      if (N > 0) {
+        state.tvZone = 'cards';
+        state.tvFocusIndex = Math.min(state.tvTabIndex % cols, N - 1);
+      } else {
+        state.tvZone = 'bottom';
+      }
+    }
+    updateTvFocus();
+    return;
+  }
+
+  // ZONE: HEADER (EXIT BUTTON)
+  if (state.tvZone === 'header') {
+    if (key === 'ArrowDown') {
+      state.tvZone = 'tabs';
+    } else if (key === 'ArrowLeft') {
+      state.tvZone = 'tabs';
+      const tabs = document.querySelectorAll('#tvTabsBar .tv-tab');
+      state.tvTabIndex = Math.max(0, tabs.length - 1);
+    }
+    updateTvFocus();
+    return;
+  }
+
+  // ZONE: BOTTOM ACTION BUTTONS
+  if (state.tvZone === 'bottom') {
+    if (key === 'ArrowLeft') {
+      if (state.tvBottomIndex > 0) state.tvBottomIndex--;
+    } else if (key === 'ArrowRight') {
+      if (state.tvBottomIndex < 2) state.tvBottomIndex++;
+    } else if (key === 'ArrowUp') {
+      // Move UP into the bottom row of cards!
+      if (N > 0) {
+        state.tvZone = 'cards';
+        const lastRowStart = (totalRows - 1) * cols;
+        const targetCol = (state.tvBottomIndex === 0) ? 0 : (state.tvBottomIndex === 1 ? Math.min(2, cols - 1) : cols - 1);
+        state.tvFocusIndex = Math.min(N - 1, lastRowStart + targetCol);
+      } else {
+        state.tvZone = 'tabs';
+      }
+    } else if (key === 'ArrowDown') {
+      // Stays in bottom buttons, does NOT jump page
+    }
+    updateTvFocus();
+    return;
+  }
 }
 
 function handleTvEnter() {
-  handleTvCardClick(state.tvFocusIndex);
+  if (state.tvZone === 'cards') {
+    handleTvCardClick(state.tvFocusIndex);
+  } else if (state.tvZone === 'tabs') {
+    const tabs = document.querySelectorAll('#tvTabsBar .tv-tab');
+    if (tabs[state.tvTabIndex]) {
+      tabs[state.tvTabIndex].click();
+    }
+  } else if (state.tvZone === 'header') {
+    setTvMode(false);
+  } else if (state.tvZone === 'bottom') {
+    if (state.tvBottomIndex === 0) {
+      tvPagePrev();
+    } else if (state.tvBottomIndex === 1) {
+      tvPageNext();
+    } else if (state.tvBottomIndex === 2) {
+      tvOpenSearchPrompt();
+    }
+  }
 }
 
 function handleTvBack() {
@@ -2142,6 +2285,9 @@ function handleTvBack() {
     exitNetflixPlayer();
   } else if (movieDetailModal.style.display === 'flex') {
     closeDetailModal();
+  } else if (state.tvZone === 'bottom' || state.tvZone === 'tabs' || state.tvZone === 'header') {
+    state.tvZone = 'cards';
+    updateTvFocus();
   } else if (state.tvPageIndex > 0) {
     tvPagePrev();
   } else if (state.tvCategory !== 'all') {

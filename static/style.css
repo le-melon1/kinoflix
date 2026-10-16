@@ -1938,11 +1938,16 @@ body.tv-mode .tv-mode-btn {
   border-radius: 4px;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s cubic-bezier(0.165, 0.84, 0.44, 1);
 }
-.tv-exit-btn:hover {
-  background: #fff;
-  color: #000;
+.tv-exit-btn:hover,
+.tv-exit-btn.tv-focused {
+  background: var(--netflix-red) !important;
+  color: #fff !important;
+  border-color: var(--netflix-red) !important;
+  outline: 3px solid #fff !important;
+  box-shadow: 0 0 20px rgba(229, 9, 20, 0.9) !important;
+  transform: scale(1.05) !important;
 }
 
 .tv-tabs-bar {
@@ -1962,13 +1967,22 @@ body.tv-mode .tv-mode-btn {
   font-size: 0.92rem;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.2s;
+  transition: all 0.2s cubic-bezier(0.165, 0.84, 0.44, 1);
 }
 .tv-tab.active,
 .tv-tab:hover {
   background: #fff;
   color: #000;
   border-color: #fff;
+}
+.tv-tab.tv-focused {
+  outline: 3px solid var(--netflix-red) !important;
+  border-color: var(--netflix-red) !important;
+  background: #fff !important;
+  color: #000 !important;
+  box-shadow: 0 0 20px rgba(229, 9, 20, 0.9) !important;
+  transform: scale(1.08) !important;
+  z-index: 10;
 }
 
 /* TV Exactly 10 Items Grid (2 rows of 5) */
@@ -2018,21 +2032,7 @@ body.tv-mode .tv-mode-btn {
   object-fit: cover;
 }
 .tv-card-num-badge {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  background: #ffcc00;
-  color: #000;
-  font-size: 1.25rem;
-  font-weight: 900;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.8);
-  border: 2px solid #000;
+  display: none !important;
 }
 
 .tv-card-body {
@@ -2078,13 +2078,17 @@ body.tv-mode .tv-mode-btn {
   font-size: 1rem;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s cubic-bezier(0.165, 0.84, 0.44, 1);
 }
 .tv-nav-btn:hover,
 .tv-nav-btn.tv-focused {
-  outline: 3px solid var(--netflix-red);
-  background: var(--netflix-red);
-  border-color: var(--netflix-red);
+  outline: 3px solid #fff !important;
+  background: var(--netflix-red) !important;
+  border-color: var(--netflix-red) !important;
+  color: #fff !important;
+  box-shadow: 0 0 20px rgba(229, 9, 20, 0.9) !important;
+  transform: scale(1.05) !important;
+  z-index: 10;
 }
 
 /* Downloads view item card */
