@@ -82,6 +82,17 @@ async def get_catalog():
     from backend.catalog import get_home_catalog
     return get_home_catalog()
 
+@app.get("/api/catalog/more")
+async def get_catalog_more(category: str = Query(...), page: int = Query(1)):
+    from backend.catalog import get_more_category_movies
+    items = await get_more_category_movies(category, page)
+    return {
+        "category": category,
+        "page": page,
+        "items": items,
+        "has_more": len(items) > 0
+    }
+
 @app.get("/api/settings/rutracker/status")
 async def get_rutracker_status():
     status = await rutracker_client.check_session()

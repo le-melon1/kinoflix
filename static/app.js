@@ -279,52 +279,132 @@ function renderBillboard(item) {
   billboardPlot.textContent = item.plot;
 }
 
+function renderCardHtml(item) {
+  const cardImg = item.backdrop || item.poster || generateCardSvg(item.title, item.year, item.quality);
+  return `
+    <div class="netflix-card" onclick="openMovieDetails(${JSON.stringify(item).replace(/"/g, '&quot;')})">
+      <img src="${cardImg}" alt="${escapeHtml(item.title)}" class="card-backdrop-img" onerror="this.onerror=null; this.src=generateCardSvg('${escapeJs(item.title)}', '${item.year || ''}', '${item.quality || 'HD'}');">
+      <div class="card-overlay-hover">
+        <div class="card-title-mini">${escapeHtml(item.title)}</div>
+        <div class="card-meta-mini">
+          <span style="color:var(--match-green); font-weight:700;">${item.match || '98%'}</span>
+          <span class="age-badge">${item.age || '16+'}</span>
+          <span class="quality-badge">${item.quality || 'HD'}</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderRows(categories) {
   rowsContainer.innerHTML = categories.map(cat => {
     if (cat.is_top10) {
       return `
-        <div class="netflix-row">
+        <div class="netflix-row" data-category="${cat.id}">
           <div class="row-header">
             <h2 class="row-title">${cat.title}</h2>
           </div>
-          <div class="row-carousel">
-            ${cat.items.map((item, idx) => `
-              <div class="top10-card" onclick="openMovieDetails(${JSON.stringify(item).replace(/"/g, '&quot;')})">
-                <div class="top10-number">${idx + 1}</div>
-                <div class="top10-poster-wrap">
-                  <img src="${item.poster}" alt="${escapeHtml(item.title)}" onerror="this.onerror=null; this.src=generateCardSvg('${escapeJs(item.title)}', '${item.year || ''}', '${item.quality || '4K'}');">
-                  <div class="top10-title-bar">${escapeHtml(item.title)}</div>
+          <div class="row-carousel-wrapper">
+            <button class="row-arrow row-arrow-prev" onclick="scrollCarouselRow('${cat.id}', -1)" title="Предыдущие">‹</button>
+            <div class="row-carousel" id="carousel_${cat.id}">
+              ${cat.items.map((item, idx) => `
+                <div class="top10-card" onclick="openMovieDetails(${JSON.stringify(item).replace(/"/g, '&quot;')})">
+                  <div class="top10-number">${idx + 1}</div>
+                  <div class="top10-poster-wrap">
+                    <img src="${item.poster}" alt="${escapeHtml(item.title)}" onerror="this.onerror=null; this.src=generateCardSvg('${escapeJs(item.title)}', '${item.year || ''}', '${item.quality || '4K'}');">
+                    <div class="top10-title-bar">${escapeHtml(item.title)}</div>
+                  </div>
                 </div>
-              </div>
-            `).join('')}
+              `).join('')}
+            </div>
+            <button class="row-arrow row-arrow-next" onclick="scrollCarouselRow('${cat.id}', 1)" title="Следующие">›</button>
           </div>
         </div>
       `;
     }
 
     return `
-      <div class="netflix-row">
+      <div class="netflix-row" data-category="${cat.id}">
         <div class="row-header">
           <h2 class="row-title">${cat.title}</h2>
+          <span class="row-scroll-hint">Листайте бесконечно ➔</span>
         </div>
-        <div class="row-carousel">
-          ${cat.items.map(item => `
-            <div class="netflix-card" onclick="openMovieDetails(${JSON.stringify(item).replace(/"/g, '&quot;')})">
-              <img src="${item.backdrop || item.poster}" alt="${escapeHtml(item.title)}" class="card-backdrop-img" onerror="this.onerror=null; this.src=generateCardSvg('${escapeJs(item.title)}', '${item.year || ''}', '${item.quality || 'HD'}');">
-              <div class="card-overlay-hover">
-                <div class="card-title-mini">${escapeHtml(item.title)}</div>
-                <div class="card-meta-mini">
-                  <span style="color:var(--match-green); font-weight:700;">${item.match || '98%'}</span>
-                  <span class="age-badge">${item.age || '16+'}</span>
-                  <span class="quality-badge">${item.quality || 'HD'}</span>
-                </div>
-              </div>
-            </div>
-          `).join('')}
+        <div class="row-carousel-wrapper">
+          <button class="row-arrow row-arrow-prev" onclick="scrollCarouselRow('${cat.id}', -1)" title="Предыдущие">‹</button>
+          <div class="row-carousel" id="carousel_${cat.id}" data-category="${cat.id}" data-page="1" onscroll="handleCarouselScroll('${cat.id}')">
+            ${cat.items.map(item => renderCardHtml(item)).join('')}
+          </div>
+          <button class="row-arrow row-arrow-next" onclick="scrollCarouselRow('${cat.id}', 1)" title="Следующие (бесконечные рекомендации)">›</button>
         </div>
       </div>
     `;
   }).join('');
+}
+
+const _loadingRows = new Set();
+
+function scrollCarouselRow(catId, dir) {
+  const el = document.getElementById(`carousel_${catId}`);
+  if (!el) return;
+  const scrollAmt = el.clientWidth * 0.75;
+  el.scrollBy({ left: dir * scrollAmt, behavior: 'smooth' });
+  if (dir > 0) {
+    setTimeout(() => handleCarouselScroll(catId), 350);
+  }
+}
+
+async function handleCarouselScroll(catId) {
+  if (catId === 'top10') return;
+  const el = document.getElementById(`carousel_${catId}`);
+  if (!el || _loadingRows.has(catId)) return;
+
+  const remaining = el.scrollWidth - (el.scrollLeft + el.clientWidth);
+  if (remaining < 650) {
+    await loadMoreCategoryItems(catId);
+  }
+}
+
+async function loadMoreCategoryItems(catId) {
+  const el = document.getElementById(`carousel_${catId}`);
+  if (!el || _loadingRows.has(catId)) return;
+
+  _loadingRows.add(catId);
+  const currentPage = parseInt(el.getAttribute('data-page') || '1');
+  const nextPage = currentPage + 1;
+
+  const loaderId = `loader_${catId}_${nextPage}`;
+  el.insertAdjacentHTML('beforeend', `
+    <div class="carousel-loading-item" id="${loaderId}">
+      <div class="netflix-spinner-circle" style="width:24px; height:24px;"></div>
+      <span>Загрузка...</span>
+    </div>
+  `);
+
+  try {
+    const res = await fetch(`/api/catalog/more?category=${encodeURIComponent(catId)}&page=${nextPage}`);
+    const data = await res.json();
+    const loader = document.getElementById(loaderId);
+    if (loader) loader.remove();
+
+    const items = data.items || [];
+    if (items.length > 0) {
+      el.setAttribute('data-page', nextPage);
+      const newCardsHtml = items.map(it => renderCardHtml(it)).join('');
+      el.insertAdjacentHTML('beforeend', newCardsHtml);
+
+      const cat = state.catalog?.categories?.find(c => c.id === catId);
+      if (cat) {
+        cat.items = cat.items || [];
+        cat.items.push(...items);
+      }
+    }
+  } catch (err) {
+    console.warn('Load more items error for', catId, err);
+    const loader = document.getElementById(loaderId);
+    if (loader) loader.remove();
+  } finally {
+    _loadingRows.delete(catId);
+  }
 }
 
 // --- SEARCH HANDLING ---
@@ -1861,6 +1941,7 @@ function switchTvCategory(cat) {
   state.tvCategory = cat;
   state.tvPageIndex = 0;
   state.tvFocusIndex = 0;
+  state.tvPageApi = 1;
 
   document.querySelectorAll('.tv-tab').forEach(t => {
     t.classList.toggle('active', t.getAttribute('data-tv-cat') === cat);
@@ -2069,13 +2150,53 @@ function handleTvBack() {
   }
 }
 
-function tvPageNext() {
+let _loadingTvMore = false;
+async function checkAndLoadMoreTvItems() {
+  if (_loadingTvMore || state.tvCategory === 'downloads') return;
+  const total = state.tvItems.length;
+  const remaining = total - (state.tvPageIndex * 10);
+  if (remaining < 25) {
+    _loadingTvMore = true;
+    state.tvPageApi = (state.tvPageApi || 1) + 1;
+    try {
+      const res = await fetch(`/api/catalog/more?category=${encodeURIComponent(state.tvCategory)}&page=${state.tvPageApi}`);
+      const data = await res.json();
+      const items = data.items || [];
+      if (items.length > 0) {
+        const existing = new Set(state.tvItems.map(i => i.title));
+        for (const it of items) {
+          if (!existing.has(it.title)) {
+            existing.add(it.title);
+            state.tvItems.push(it);
+          }
+        }
+        renderTvCards();
+      }
+    } catch (e) {
+      console.warn('TV load more error:', e);
+    } finally {
+      _loadingTvMore = false;
+    }
+  }
+}
+
+async function tvPageNext() {
   const total = state.tvItems.length;
   const maxPages = Math.ceil(total / 10);
   if (state.tvPageIndex < maxPages - 1) {
     state.tvPageIndex++;
     state.tvFocusIndex = 0;
     renderTvCards();
+    checkAndLoadMoreTvItems();
+  } else {
+    await checkAndLoadMoreTvItems();
+    const newTotal = state.tvItems.length;
+    const newMax = Math.ceil(newTotal / 10);
+    if (state.tvPageIndex < newMax - 1) {
+      state.tvPageIndex++;
+      state.tvFocusIndex = 0;
+      renderTvCards();
+    }
   }
 }
 

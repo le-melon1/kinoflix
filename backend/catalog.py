@@ -1158,3 +1158,92 @@ def get_home_catalog() -> Dict[str, Any]:
         "genres": ALL_GENRES,
         "categories": categories
     }
+
+_cat_page_cache: Dict[str, List[Dict[str, Any]]] = {}
+
+async def get_more_category_movies(category_id: str, page: int = 1) -> List[Dict[str, Any]]:
+    """
+    Fetches an endless feed of popular, critically acclaimed, and genre recommendations from TMDB
+    for infinite horizontal & vertical scrolling in any category.
+    """
+    cache_key = f"{category_id}_{page}"
+    if cache_key in _cat_page_cache:
+        return _cat_page_cache[cache_key]
+
+    genre_map = {
+        'action': ('movie', 'with_genres=28&sort_by=popularity.desc'),
+        'comedies': ('movie', 'with_genres=35&sort_by=popularity.desc'),
+        'dramas': ('movie', 'with_genres=18&sort_by=popularity.desc'),
+        'scifi': ('movie', 'with_genres=878&sort_by=popularity.desc'),
+        'thrillers': ('movie', 'with_genres=53&sort_by=popularity.desc'),
+        'horror': ('movie', 'with_genres=27&sort_by=popularity.desc'),
+        'anime': ('tv', 'with_genres=16&with_original_language=ja&sort_by=popularity.desc'),
+        'detectives': ('movie', 'with_genres=9648&sort_by=popularity.desc'),
+        'crime': ('movie', 'with_genres=80&sort_by=popularity.desc'),
+        'adventure': ('movie', 'with_genres=12&sort_by=popularity.desc'),
+        'fantasy': ('movie', 'with_genres=14&sort_by=popularity.desc'),
+        'romance': ('movie', 'with_genres=10749&sort_by=popularity.desc'),
+        'animation': ('movie', 'with_genres=16&sort_by=popularity.desc'),
+        'history_war': ('movie', 'with_genres=36,10752&sort_by=popularity.desc'),
+        'western': ('movie', 'with_genres=37&sort_by=popularity.desc'),
+        'documentary': ('movie', 'with_genres=99&sort_by=popularity.desc'),
+        'blockbusters_4k': ('movie', 'sort_by=revenue.desc'),
+        'top100': ('movie', 'sort_by=vote_average.desc&vote_count.gte=1000'),
+        'new_releases': ('movie', 'sort_by=release_date.desc&vote_count.gte=30'),
+        'netflix_picks': ('tv', 'with_networks=213&sort_by=popularity.desc&vote_count.gte=100&without_genres=10767,10764'),
+        'series': ('tv', 'sort_by=popularity.desc&vote_count.gte=300&without_genres=10767,10763'),
+        'trending': ('trending', ''),
+    }
+
+    mtype, params = genre_map.get(category_id, ('movie', 'sort_by=popularity.desc'))
+    tmdb_key = '1cf50e6248dc270629e802686245c2c8'
+    if mtype == 'trending':
+        url = f'https://api.themoviedb.org/3/trending/all/week?api_key={tmdb_key}&language=ru-RU&page={page}'
+    else:
+        url = f'https://api.themoviedb.org/3/discover/{mtype}?api_key={tmdb_key}&language=ru-RU&{params}&page={page}'
+
+    items = []
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=4.5) as client:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                data = resp.json()
+                results = data.get("results", [])
+                for r in results:
+                    title = r.get("title") or r.get("name")
+                    if not title:
+                        continue
+                    b_path = r.get("backdrop_path")
+                    p_path = r.get("poster_path")
+                    if not b_path and not p_path:
+                        continue
+                    is_series = (mtype == "tv") or (r.get("media_type") == "tv")
+                    rel = r.get("release_date") or r.get("first_air_date") or ""
+                    year = rel[:4] if len(rel) >= 4 else "2024"
+                    vote_avg = r.get("vote_average", 8.0)
+                    rating = round(vote_avg, 1)
+                    items.append({
+                        "id": f"tmdb_{r['id']}",
+                        "title": title,
+                        "original_title": r.get("original_title") or r.get("original_name") or title,
+                        "year": year,
+                        "rating": str(rating),
+                        "match": f"{int(min(99, max(75, rating * 10)))}% совпадение",
+                        "age": "18+" if r.get("adult") else "16+",
+                        "duration": "Сериал" if is_series else "2 ч 10 мин",
+                        "quality": "4K UHD" if rating >= 7.5 else "1080p Full HD",
+                        "audio": "Дубляж • Лицензия",
+                        "genre": "Рекомендации KinoFlix",
+                        "backdrop": f"https://image.tmdb.org/t/p/w1280{b_path}" if b_path else f"https://image.tmdb.org/t/p/w780{p_path}",
+                        "poster": f"https://image.tmdb.org/t/p/w780{p_path}" if p_path else f"https://image.tmdb.org/t/p/w1280{b_path}",
+                        "plot": r.get("overview") or "Захватывающий сюжет с неожиданными поворотами и великолепной актёрской игрой.",
+                        "search_query": title,
+                        "is_series": is_series
+                    })
+    except Exception as e:
+        print(f"Error fetching more category {category_id}: {e}")
+
+    _cat_page_cache[cache_key] = items
+    return items
+
