@@ -221,7 +221,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Header scroll effect and infinite canvas scrolling
 function setupScrollHeader() {
+  // Completely prevent mouse wheel and touch gesture scrolling in TV mode
+  window.addEventListener('wheel', (e) => {
+    if (state.tvMode) {
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  window.addEventListener('touchmove', (e) => {
+    if (state.tvMode) {
+      e.preventDefault();
+    }
+  }, { passive: false });
+
   window.addEventListener('scroll', () => {
+    if (state.tvMode) {
+      if (window.scrollY !== 0) window.scrollTo(0, 0);
+      return;
+    }
+
     if (window.scrollY > 40) {
       netflixHeader.classList.add('scrolled');
     } else {
@@ -2122,6 +2140,7 @@ function setTvMode(enable) {
   state.tvMode = enable;
   localStorage.setItem('kinoflix_tv_mode', enable ? 'true' : 'false');
   document.body.classList.toggle('tv-mode', enable);
+  document.documentElement.classList.toggle('tv-mode', enable);
 
   if (tvModeBtnText) {
     tvModeBtnText.textContent = enable ? 'ТВ Активен' : 'Для ТВ';
@@ -2133,10 +2152,11 @@ function setTvMode(enable) {
   }
 
   if (enable) {
+    window.scrollTo(0, 0);
     homeView.style.display = 'none';
     searchResultsView.style.display = 'none';
     if (downloadsView) downloadsView.style.display = 'none';
-    if (tvView) tvView.style.display = 'block';
+    if (tvView) tvView.style.display = 'flex';
     state.tvZone = 'cards';
     state.tvFocusIndex = 0;
     state.tvBottomIndex = 1;
@@ -2299,20 +2319,29 @@ function updateTvFocus() {
     const focusedCard = document.getElementById(`tvCard_${state.tvFocusIndex}`);
     if (focusedCard) {
       focusedCard.classList.add('tv-focused');
-      focusedCard.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
     }
   } else if (state.tvZone === 'tabs') {
     const tabs = document.querySelectorAll('#tvTabsBar .tv-tab');
     if (tabs.length > 0) {
       if (state.tvTabIndex >= tabs.length) state.tvTabIndex = tabs.length - 1;
       if (state.tvTabIndex < 0) state.tvTabIndex = 0;
-      tabs[state.tvTabIndex].classList.add('tv-focused');
-      tabs[state.tvTabIndex].scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+      const curTab = tabs[state.tvTabIndex];
+      curTab.classList.add('tv-focused');
+      // Scroll horizontally within tvTabsBar without scrolling the window
+      const bar = document.getElementById('tvTabsBar');
+      if (bar) {
+        const tabLeft = curTab.offsetLeft;
+        const tabRight = tabLeft + curTab.offsetWidth;
+        if (tabLeft < bar.scrollLeft) {
+          bar.scrollTo({ left: Math.max(0, tabLeft - 30), behavior: 'smooth' });
+        } else if (tabRight > bar.scrollLeft + bar.clientWidth) {
+          bar.scrollTo({ left: tabRight - bar.clientWidth + 30, behavior: 'smooth' });
+        }
+      }
     }
   } else if (state.tvZone === 'header') {
     if (exitBtn) {
       exitBtn.classList.add('tv-focused');
-      exitBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
     }
   } else if (state.tvZone === 'bottom') {
     if (state.tvBottomIndex < 0) state.tvBottomIndex = 0;
@@ -2320,7 +2349,6 @@ function updateTvFocus() {
     const btn = bottomBtns[state.tvBottomIndex];
     if (btn) {
       btn.classList.add('tv-focused');
-      btn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
     }
   }
 }

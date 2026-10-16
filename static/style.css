@@ -1881,11 +1881,30 @@ body.tv-mode .tv-mode-btn {
   box-shadow: 0 0 12px rgba(229, 9, 20, 0.8);
 }
 
+body.tv-mode,
+html.tv-mode {
+  overflow: hidden !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+  width: 100vw !important;
+  position: fixed !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+body.tv-mode .netflix-header {
+  height: 56px;
+}
+
 .tv-view {
-  padding: 80px 4% 40px;
-  min-height: 100vh;
+  box-sizing: border-box;
+  height: 100vh;
+  max-height: 100vh;
+  padding: 64px 3% 10px;
   display: flex;
   flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden !important;
 }
 
 .tv-banner {
@@ -1893,29 +1912,30 @@ body.tv-mode .tv-mode-btn {
   justify-content: space-between;
   align-items: center;
   background: rgba(20, 20, 20, 0.95);
-  border: 2px solid rgba(229, 9, 20, 0.5);
-  padding: 14px 20px;
+  border: 1.5px solid rgba(229, 9, 20, 0.45);
+  padding: 8px 16px;
   border-radius: 8px;
-  margin-bottom: 20px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+  margin-bottom: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  flex-shrink: 0;
 }
 .tv-banner-left {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
 }
 .tv-badge {
   background: var(--netflix-red);
   color: #fff;
   font-weight: 900;
-  font-size: 0.9rem;
-  padding: 4px 10px;
+  font-size: 0.85rem;
+  padding: 3px 8px;
   border-radius: 4px;
   letter-spacing: 1px;
 }
 .tv-instructions {
   color: #ddd;
-  font-size: 0.95rem;
+  font-size: 0.88rem;
 }
 .tv-instructions strong {
   color: #ffcc00;
@@ -1923,20 +1943,21 @@ body.tv-mode .tv-mode-btn {
 .tv-banner-right {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
 }
 .tv-page-info {
   color: #aaa;
   font-weight: 700;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
 .tv-exit-btn {
   background: rgba(255, 255, 255, 0.15);
   border: 1px solid rgba(255, 255, 255, 0.3);
   color: #fff;
-  padding: 8px 16px;
+  padding: 6px 14px;
   border-radius: 4px;
   font-weight: 700;
+  font-size: 0.82rem;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.165, 0.84, 0.44, 1);
 }
@@ -1952,22 +1973,29 @@ body.tv-mode .tv-mode-btn {
 
 .tv-tabs-bar {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   overflow-x: auto;
-  padding-bottom: 14px;
-  margin-bottom: 20px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding-bottom: 2px;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+.tv-tabs-bar::-webkit-scrollbar {
+  display: none;
 }
 .tv-tab {
   background: #222;
   border: 1px solid rgba(255,255,255,0.15);
   color: #bbb;
-  padding: 10px 18px;
-  border-radius: 20px;
+  padding: 6px 14px;
+  border-radius: 18px;
   font-weight: 700;
-  font-size: 0.92rem;
+  font-size: 0.82rem;
   cursor: pointer;
   white-space: nowrap;
   transition: all 0.2s cubic-bezier(0.165, 0.84, 0.44, 1);
+  flex-shrink: 0;
 }
 .tv-tab.active,
 .tv-tab:hover {
@@ -1981,40 +2009,46 @@ body.tv-mode .tv-mode-btn {
   background: #fff !important;
   color: #000 !important;
   box-shadow: 0 0 20px rgba(229, 9, 20, 0.9) !important;
-  transform: scale(1.08) !important;
+  transform: scale(1.06) !important;
   z-index: 10;
 }
 
 /* TV Exactly 10 Items Grid (2 rows of 5) */
 .tv-cards-grid {
+  flex: 1;
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 20px;
-  margin-bottom: 30px;
+  grid-template-rows: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 8px;
+  min-height: 0;
 }
 
 @media (max-width: 1200px) {
   .tv-cards-grid {
     grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(5, 1fr);
   }
 }
 
 .tv-card {
   position: relative;
   background: #181818;
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
   cursor: pointer;
   transition: transform 0.2s cubic-bezier(0.165, 0.84, 0.44, 1), box-shadow 0.2s, outline 0.15s;
   border: 2px solid transparent;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  height: 100%;
 }
 
 .tv-card:hover,
 .tv-card.tv-focused {
   outline: 4px solid var(--netflix-red) !important;
-  transform: scale(1.06) !important;
+  transform: scale(1.05) !important;
   box-shadow: 0 0 25px rgba(229, 9, 20, 0.85), 0 10px 30px rgba(0,0,0,0.9) !important;
   z-index: 10;
 }
@@ -2022,7 +2056,8 @@ body.tv-mode .tv-mode-btn {
 .tv-card-thumb-wrap {
   position: relative;
   width: 100%;
-  aspect-ratio: 16/9;
+  flex: 1;
+  min-height: 0;
   background: #222;
   overflow: hidden;
 }
@@ -2036,26 +2071,26 @@ body.tv-mode .tv-mode-btn {
 }
 
 .tv-card-body {
-  padding: 12px;
-  flex: 1;
+  padding: 6px 10px 8px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
 }
 .tv-card-title {
-  font-size: 0.95rem;
+  font-size: 0.88rem;
   font-weight: 700;
   color: #fff;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-bottom: 6px;
+  margin-bottom: 2px;
 }
 .tv-card-meta {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   color: #aaa;
 }
 .tv-card-rating {
@@ -2066,16 +2101,18 @@ body.tv-mode .tv-mode-btn {
 .tv-bottom-nav {
   display: flex;
   justify-content: center;
-  gap: 20px;
-  padding: 10px 0 30px;
+  align-items: center;
+  gap: 16px;
+  padding: 4px 0 2px;
+  flex-shrink: 0;
 }
 .tv-nav-btn {
   background: #242424;
-  border: 2px solid rgba(255,255,255,0.2);
+  border: 1.5px solid rgba(255,255,255,0.2);
   color: #fff;
-  padding: 12px 24px;
+  padding: 8px 18px;
   border-radius: 6px;
-  font-size: 1rem;
+  font-size: 0.88rem;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.165, 0.84, 0.44, 1);
