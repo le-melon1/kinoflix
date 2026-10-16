@@ -53,7 +53,13 @@ const state = {
   canvasPage: 1,
   canvasLoading: false,
   settings: null,
-  lastCompletedFilenames: null
+  lastCompletedFilenames: null,
+  favorites: [],
+  continueWatching: [],
+  catalogTypeFilter: 'all',
+  catalogSort: 'popularity',
+  activeSubtitleTrack: -1,
+  subtitleTracks: []
 };
 
 // DOM Elements
@@ -72,6 +78,15 @@ const searchLoader = document.getElementById('searchLoader');
 const searchGrid = document.getElementById('searchGrid');
 const downloadsView = document.getElementById('downloadsView');
 const downloadsGrid = document.getElementById('downloadsGrid');
+const favoritesView = document.getElementById('favoritesView');
+const favoritesGrid = document.getElementById('favoritesGrid');
+const continueWatchingSection = document.getElementById('continueWatchingSection');
+const continueWatchingGrid = document.getElementById('continueWatchingGrid');
+const skipIntroBtn = document.getElementById('skipIntroBtn');
+const playerSubMenu = document.getElementById('playerSubMenu');
+const playerSubBtn = document.getElementById('playerSubBtn');
+const billboardFavBtn = document.getElementById('billboardFavBtn');
+const modalFavBtn = document.getElementById('modalFavBtn');
 const tvView = document.getElementById('tvView');
 const tvCardsGrid = document.getElementById('tvCardsGrid');
 const tvPageInfo = document.getElementById('tvPageInfo');
@@ -201,6 +216,410 @@ function generateCardSvg(title, year, quality) {
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
 
+// --- FAVORITES (МОЙ СПИСОК) ---
+function loadFavorites() {
+  try {
+    const raw = localStorage.getItem('kinoflix_favorites');
+    state.favorites = raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    state.favorites = [];
+  }
+}
+
+function saveFavorites() {
+  try {
+    localStorage.setItem('kinoflix_favorites', JSON.stringify(state.favorites));
+  } catch (e) {}
+}
+
+function isFavorite(idOrTitle) {
+  if (!idOrTitle) return false;
+  const match = String(idOrTitle).toLowerCase().trim();
+  return (state.favorites || []).some(f => (f.id && String(f.id).toLowerCase().trim() === match) || (f.title && f.title.toLowerCase().trim() === match));
+}
+
+function toggleFavoriteItem(item) {
+  if (!item || !item.title) return;
+  const key = item.id || item.title;
+  const exists = isFavorite(key);
+
+  if (exists) {
+    const match = String(key).toLowerCase().trim();
+    state.favorites = (state.favorites || []).filter(f => !((f.id && String(f.id).toLowerCase().trim() === match) || (f.title && f.title.toLowerCase().trim() === match)));
+    showToast(`«${item.title}» удалён из списка`, 'info');
+  } else {
+    state.favorites = state.favorites || [];
+    state.favorites.unshift({
+      id: item.id || item.title,
+      title: item.title,
+      poster: item.poster || item.backdrop,
+      backdrop: item.backdrop || item.poster,
+      rating: item.rating,
+      year: item.year,
+      quality: item.quality,
+      age: item.age,
+      genre: item.genre,
+      is_series: item.is_series,
+      plot: item.plot
+    });
+    showToast(`«${item.title}» добавлен в Мой список!`, 'success');
+  }
+
+  saveFavorites();
+  updateCardFavoriteButtons();
+  updateBillboardFavButton();
+  updateModalFavButton();
+
+  if (state.currentCategory === 'favorites') {
+    renderFavoritesView();
+  }
+}
+
+function toggleBillboardFavorite() {
+  const item = state.billboardMovie || (state.catalog && state.catalog.billboard);
+  if (item) toggleFavoriteItem(item);
+}
+
+function toggleModalFavorite() {
+  const item = state.activeMovie || state.activeTorrentItem;
+  if (item) toggleFavoriteItem(item);
+}
+
+function updateBillboardFavButton() {
+  const item = state.billboardMovie || (state.catalog && state.catalog.billboard);
+  if (!item || !billboardFavBtn) return;
+  const fav = isFavorite(item.id || item.title);
+  const icon = document.getElementById('billboardFavIcon');
+  const text = document.getElementById('billboardFavText');
+  if (icon) icon.textContent = fav ? '✓' : '＋';
+  if (text) text.textContent = fav ? 'В списке' : 'В список';
+  billboardFavBtn.style.borderColor = fav ? '#46d369' : 'rgba(255,255,255,0.4)';
+  billboardFavBtn.style.color = fav ? '#46d369' : '#fff';
+}
+
+function updateModalFavButton() {
+  const item = state.activeMovie || state.activeTorrentItem;
+  if (!item || !modalFavBtn) return;
+  const fav = isFavorite(item.id || item.title);
+  const icon = document.getElementById('modalFavIcon');
+  const text = document.getElementById('modalFavText');
+  if (icon) icon.textContent = fav ? '✓' : '＋';
+  if (text) text.textContent = fav ? 'В списке' : 'В список';
+  modalFavBtn.style.borderColor = fav ? '#46d369' : 'rgba(255,255,255,0.3)';
+  modalFavBtn.style.color = fav ? '#46d369' : '#fff';
+}
+
+function updateCardFavoriteButtons() {
+  document.querySelectorAll('.card-fav-btn').forEach(btn => {
+    const parentCard = btn.closest('.netflix-card') || btn.closest('.grid-card');
+    if (!parentCard) return;
+    const titleEl = parentCard.querySelector('.card-title-mini') || parentCard.querySelector('.grid-card-title-bar');
+    if (!titleEl) return;
+    let title = titleEl.textContent.trim();
+    title = title.replace(/\s*\(\d{4}\)$/, '').trim();
+    const fav = isFavorite(title);
+    btn.classList.toggle('active', fav);
+    btn.textContent = fav ? '★' : '＋';
+    btn.title = fav ? 'Удалить из списка' : 'В список';
+  });
+}
+
+function openFavoritesView() {
+  document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+  const favNav = document.getElementById('navFavorites');
+  if (favNav) favNav.classList.add('active');
+
+  homeView.style.display = 'none';
+  searchResultsView.style.display = 'none';
+  if (tvView) tvView.style.display = 'none';
+  if (downloadsView) downloadsView.style.display = 'none';
+  if (favoritesView) favoritesView.style.display = 'block';
+
+  renderFavoritesView();
+}
+
+function renderFavoritesView() {
+  if (!favoritesGrid) return;
+  const list = state.favorites || [];
+  const countEl = document.getElementById('favoritesCount');
+  if (countEl) countEl.textContent = `${list.length} ${getNoun(list.length, 'элемент', 'элемента', 'элементов')}`;
+
+  if (list.length === 0) {
+    favoritesGrid.innerHTML = `
+      <div style="grid-column: 1/-1; text-align: center; padding: 60px 20px; color: #888;">
+        <div style="font-size: 48px; margin-bottom: 16px;">⭐</div>
+        <h3 style="color: #fff; font-size: 1.25rem; margin-bottom: 8px;">Ваш список пока пуст</h3>
+        <p style="font-size: 0.95rem; max-width: 480px; margin: 0 auto; line-height: 1.5;">
+          Нажмите на значок <strong>＋</strong> на карточке или странице фильма, чтобы сохранить его в избранное для быстрого доступа.
+        </p>
+      </div>
+    `;
+    return;
+  }
+
+  favoritesGrid.innerHTML = list.map(item => renderCardHtml(item)).join('');
+}
+
+function getNoun(number, one, two, five) {
+  let n = Math.abs(number);
+  n %= 100;
+  if (n >= 5 && n <= 20) return five;
+  n %= 10;
+  if (n === 1) return one;
+  if (n >= 2 && n <= 4) return two;
+  return five;
+}
+
+// --- CONTINUE WATCHING (ПРОДОЛЖИТЬ ПРОСМОТР) ---
+function loadContinueWatching() {
+  try {
+    const raw = localStorage.getItem('kinoflix_continue_watching');
+    state.continueWatching = raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    state.continueWatching = [];
+  }
+}
+
+function saveContinueWatching() {
+  try {
+    localStorage.setItem('kinoflix_continue_watching', JSON.stringify(state.continueWatching));
+  } catch (e) {}
+}
+
+let _lastSavedCwTime = 0;
+function saveContinueWatchingProgress(cur, dur) {
+  if (!dur || dur <= 30 || cur <= 5) return;
+  const now = Date.now();
+  if (now - _lastSavedCwTime < 3000) return;
+  _lastSavedCwTime = now;
+
+  const item = state.activeTorrentItem || state.activeMovie || {};
+  const cleanTitle = state.activeMovieTitle || item.title || 'Фильм';
+  const id = item.id || state.activeTorrentHash || cleanTitle;
+  const percent = Math.min(100, Math.round((cur / dur) * 100));
+
+  if (percent >= 95) {
+    state.continueWatching = (state.continueWatching || []).filter(c => c.id !== id && c.title !== cleanTitle);
+    saveContinueWatching();
+    renderContinueWatching();
+    return;
+  }
+
+  const activeFile = (state.videoFiles && state.videoFiles.find(f => f.id === state.activeFileIndex));
+  const epTitle = activeFile ? (activeFile.title || activeFile.name || '') : '';
+
+  const entry = {
+    id: id,
+    title: cleanTitle,
+    episode_title: epTitle,
+    fileId: state.activeFileIndex,
+    hash: state.activeTorrentHash,
+    currentTime: Math.floor(cur),
+    duration: Math.floor(dur),
+    percent: percent,
+    poster: item.poster || item.backdrop,
+    backdrop: item.backdrop || item.poster,
+    item: {
+      ...item,
+      title: cleanTitle,
+      poster: item.poster,
+      backdrop: item.backdrop,
+      targetEpisodeNum: activeFile ? activeFile.episode : item.targetEpisodeNum,
+      targetSeasonNum: activeFile ? activeFile.season : item.targetSeasonNum
+    },
+    updated_at: now
+  };
+
+  state.continueWatching = [entry, ...(state.continueWatching || []).filter(c => c.id !== id && c.title !== cleanTitle)].slice(0, 20);
+  saveContinueWatching();
+  renderContinueWatching();
+}
+
+function renderContinueWatching() {
+  if (!continueWatchingSection || !continueWatchingGrid) return;
+  const list = state.continueWatching || [];
+
+  if (list.length === 0 || state.tvMode || (state.currentCategory && state.currentCategory !== 'all')) {
+    continueWatchingSection.style.display = 'none';
+    return;
+  }
+
+  continueWatchingSection.style.display = 'block';
+  const badge = document.getElementById('cwCountBadge');
+  if (badge) badge.textContent = list.length;
+
+  continueWatchingGrid.innerHTML = list.map(cw => {
+    const thumb = cw.backdrop || cw.poster || generateCardSvg(cw.title, '', 'HD');
+    const remainingMin = Math.max(1, Math.round((cw.duration - cw.currentTime) / 60));
+    return `
+      <div class="cw-card" onclick="resumeContinueWatching(${JSON.stringify(cw).replace(/"/g, '&quot;')})">
+        <button class="cw-dismiss-btn" onclick="dismissContinueWatching('${escapeJs(cw.id)}', event)" title="Удалить из списка">✕</button>
+        <div class="cw-thumb-box">
+          <img src="${thumb}" alt="${escapeHtml(cw.title)}" class="cw-thumb-img" onerror="this.onerror=null; this.src=generateCardSvg('${escapeJs(cw.title)}', '', 'HD');">
+          <div class="cw-play-overlay">
+            <div class="cw-play-icon">▶</div>
+          </div>
+        </div>
+        <div class="cw-progress-bar-wrap">
+          <div class="cw-progress-fill" style="width: ${cw.percent}%;"></div>
+        </div>
+        <div class="cw-info">
+          <div class="cw-title">${escapeHtml(cw.title)}</div>
+          <div class="cw-sub">
+            <span>${cw.episode_title ? escapeHtml(cw.episode_title) : `${cw.percent}%`}</span>
+            <span>Осталось ${remainingMin} мин</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function resumeContinueWatching(cw) {
+  if (!cw || !cw.item) return;
+  showToast(`Возобновление с ${formatTime(cw.currentTime)}`, 'info');
+  startNetflixStream(cw.item, cw.fileId, cw.currentTime);
+}
+
+function dismissContinueWatching(id, event) {
+  if (event) event.stopPropagation();
+  state.continueWatching = (state.continueWatching || []).filter(c => c.id !== id);
+  saveContinueWatching();
+  renderContinueWatching();
+  showToast('Удалено из «Продолжить просмотр»', 'info');
+}
+
+function clearWatchHistoryAction() {
+  if (confirm('Вы уверены, что хотите очистить историю просмотров и сохранённые таймкоды?')) {
+    state.continueWatching = [];
+    saveContinueWatching();
+    renderContinueWatching();
+    showToast('История просмотров полностью очищена', 'success');
+  }
+}
+
+// --- CATALOG FILTERS & SORTING ---
+function applyCatalogTypeFilter(type) {
+  state.catalogTypeFilter = type;
+  document.querySelectorAll('.cf-pill').forEach(p => {
+    p.classList.toggle('active', p.dataset.type === type);
+  });
+  refreshCatalogDisplay();
+}
+
+function applyCatalogSort(sortKey) {
+  state.catalogSort = sortKey;
+  refreshCatalogDisplay();
+}
+
+function refreshCatalogDisplay() {
+  if (state.viewMode === 'canvas') {
+    renderCanvasItems();
+  } else if (state.catalog && state.catalog.categories) {
+    switchCategory(state.currentCategory);
+  }
+}
+
+// --- PICTURE IN PICTURE, AIRPLAY & EXTERNAL PLAYERS ---
+async function togglePictureInPicture() {
+  try {
+    if (document.pictureInPictureElement) {
+      await document.exitPictureInPicture();
+    } else if (netflixVideo !== document.pictureInPictureElement) {
+      if (netflixVideo.requestPictureInPicture) {
+        await netflixVideo.requestPictureInPicture();
+      } else {
+        showToast('Picture-in-Picture не поддерживается вашим браузером', 'warning');
+      }
+    }
+  } catch (err) {
+    console.error('PiP error:', err);
+    showToast('Не удалось переключить Picture-in-Picture', 'warning');
+  }
+}
+
+function triggerAirPlayAction() {
+  if (window.WebKitPlaybackTargetAvailabilityEvent || netflixVideo.webkitShowPlaybackTargetPicker) {
+    try {
+      netflixVideo.webkitShowPlaybackTargetPicker();
+      showToast('Открыто меню выбора AirPlay устройства', 'info');
+      closeShareModal();
+      return;
+    } catch (e) {}
+  }
+  showToast('AirPlay доступен в Safari на Mac, iPhone и iPad', 'info');
+}
+
+function openShareModal() {
+  const modal = document.getElementById('shareModal');
+  const input = document.getElementById('shareStreamUrlInput');
+  if (!modal) return;
+
+  let streamUrl = '';
+  if (state.currentStreamUrl) {
+    if (state.currentStreamUrl.startsWith('http://') || state.currentStreamUrl.startsWith('https://')) {
+      streamUrl = state.currentStreamUrl;
+    } else {
+      streamUrl = window.location.origin + state.currentStreamUrl;
+    }
+  } else if (state.activeTorrentHash) {
+    streamUrl = `http://${window.location.hostname}:8090/stream?link=${encodeURIComponent(state.activeTorrentHash)}&index=${state.activeFileIndex || 1}&play=1`;
+  }
+
+  if (input) input.value = streamUrl;
+  modal.style.display = 'flex';
+}
+
+function closeShareModal() {
+  const modal = document.getElementById('shareModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function closeShareModalOnBackdrop(e) {
+  if (e.target.id === 'shareModal') closeShareModal();
+}
+
+function copyShareStreamUrl() {
+  const input = document.getElementById('shareStreamUrlInput');
+  if (input && input.value) {
+    navigator.clipboard.writeText(input.value).then(() => {
+      showToast('Ссылка потока скопирована в буфер обмена!', 'success');
+    }).catch(() => {
+      input.select();
+      document.execCommand('copy');
+      showToast('Ссылка потока скопирована!', 'success');
+    });
+  }
+}
+
+async function openInExternalPlayer(player) {
+  const input = document.getElementById('shareStreamUrlInput');
+  const url = input ? input.value : '';
+  if (!url) {
+    showToast('Ссылка на поток не сформирована', 'warning');
+    return;
+  }
+  try {
+    const res = await fetch('/api/open-external', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ player, stream_url: url })
+    });
+    const d = await res.json();
+    if (d.success) {
+      showToast(`Открыто в ${player.toUpperCase()}!`, 'success');
+      closeShareModal();
+      return;
+    }
+  } catch (err) {}
+
+  if (player === 'iina') {
+    window.location.href = `iina://weblink?url=${encodeURIComponent(url)}`;
+  } else if (player === 'vlc') {
+    window.location.href = `vlc://${url.replace(/^https?:\/\//, '')}`;
+  }
+}
+
 function getEffectiveDuration() {
   if (state.mediaDuration && state.mediaDuration > 0) {
     return state.mediaDuration;
@@ -222,6 +641,8 @@ function getEffectiveCurrentTime() {
 
 // --- INIT ---
 document.addEventListener('DOMContentLoaded', () => {
+  loadFavorites();
+  loadContinueWatching();
   loadSettings();
   loadCatalog();
   checkRuTrackerStatus();
@@ -294,6 +715,7 @@ async function loadCatalog() {
       if (state.catalog.billboard) {
         renderBillboard(state.catalog.billboard);
       }
+      renderContinueWatching();
       if (state.catalog.categories) {
         renderRows(state.catalog.categories);
       }
@@ -340,12 +762,17 @@ function renderBillboard(item) {
   billboardQuality.textContent = item.quality || 'Ultra HD 4K';
   billboardAudio.textContent = item.audio ? '5.1' : 'Стерео';
   billboardPlot.textContent = item.plot;
+  updateBillboardFavButton();
 }
 
 function renderCardHtml(item) {
   const cardImg = item.backdrop || item.poster || generateCardSvg(item.title, item.year, item.quality);
+  const fav = isFavorite(item.id || item.title);
   return `
     <div class="netflix-card" onclick="openMovieDetails(${JSON.stringify(item).replace(/"/g, '&quot;')})">
+      <button class="card-fav-btn ${fav ? 'active' : ''}" onclick="event.stopPropagation(); toggleFavoriteItem(${JSON.stringify(item).replace(/"/g, '&quot;')})" title="${fav ? 'Удалить из списка' : 'В Мой список'}">
+        ${fav ? '★' : '＋'}
+      </button>
       <img src="${cardImg}" alt="${escapeHtml(item.title)}" class="card-backdrop-img" onerror="this.onerror=null; this.src=generateCardSvg('${escapeJs(item.title)}', '${item.year || ''}', '${item.quality || 'HD'}');">
       <div class="card-overlay-hover">
         <div class="card-title-mini">${escapeHtml(item.title)}</div>
@@ -360,8 +787,51 @@ function renderCardHtml(item) {
   `;
 }
 
+function getFilteredAndSortedItems(items) {
+  if (!items) return [];
+  let res = [...items];
+
+  if (state.catalogTypeFilter === 'movie') {
+    res = res.filter(it => !it.is_series);
+  } else if (state.catalogTypeFilter === 'series') {
+    res = res.filter(it => it.is_series);
+  } else if (state.catalogTypeFilter === 'top') {
+    res = res.filter(it => parseFloat(it.rating || '0') >= 8.0);
+  }
+
+  if (state.catalogSort === 'rating_desc') {
+    res.sort((a, b) => (parseFloat(b.rating || 0) - parseFloat(a.rating || 0)));
+  } else if (state.catalogSort === 'year_desc') {
+    res.sort((a, b) => (parseInt(b.year || 0) - parseInt(a.year || 0)));
+  } else if (state.catalogSort === 'title_asc') {
+    res.sort((a, b) => (a.title || '').localeCompare(b.title || '', 'ru'));
+  }
+  return res;
+}
+
 function renderRows(categories) {
-  rowsContainer.innerHTML = categories.map(cat => {
+  if (!categories || !categories.length) {
+    rowsContainer.innerHTML = '';
+    return;
+  }
+
+  const processedCats = categories.map(cat => ({
+    ...cat,
+    items: getFilteredAndSortedItems(cat.items)
+  })).filter(c => c.items && c.items.length > 0);
+
+  if (processedCats.length === 0) {
+    rowsContainer.innerHTML = `
+      <div style="padding: 60px 4%; text-align: center; color: #888;">
+        <div style="font-size: 36px; margin-bottom: 12px;">🔍</div>
+        <h3 style="color: #fff; font-size: 1.15rem; margin-bottom: 6px;">Ничего не найдено по выбранным фильтрам</h3>
+        <p style="font-size: 0.9rem;">Попробуйте выбрать другой тип или сбросить фильтр «IMDb 8.0+»</p>
+      </div>
+    `;
+    return;
+  }
+
+  rowsContainer.innerHTML = processedCats.map(cat => {
     if (cat.is_top10) {
       return `
         <div class="netflix-row" data-category="${cat.id}">
@@ -508,6 +978,7 @@ function goHome() {
     homeView.style.display = 'none';
     searchResultsView.style.display = 'none';
     if (downloadsView) downloadsView.style.display = 'none';
+    if (favoritesView) favoritesView.style.display = 'none';
     if (tvView) tvView.style.display = 'block';
     refreshTvItems();
     return;
@@ -515,6 +986,7 @@ function goHome() {
   homeView.style.display = 'block';
   searchResultsView.style.display = 'none';
   if (downloadsView) downloadsView.style.display = 'none';
+  if (favoritesView) favoritesView.style.display = 'none';
   if (tvView) tvView.style.display = 'none';
   searchBox.classList.remove('open');
 }
@@ -621,6 +1093,7 @@ async function openDownloadsView() {
   homeView.style.display = 'none';
   searchResultsView.style.display = 'none';
   if (tvView) tvView.style.display = 'none';
+  if (favoritesView) favoritesView.style.display = 'none';
   downloadsView.style.display = 'block';
 
   startDownloadsPolling();
@@ -919,8 +1392,12 @@ function setViewMode(mode) {
 function renderCanvasCardHtml(item) {
   const cardImg = item.backdrop || item.poster || generateCardSvg(item.title, item.year, item.quality);
   const cardYear = item.year || item.display_year || '';
+  const fav = isFavorite(item.id || item.title);
   return `
     <div class="grid-card canvas-card" onclick="openMovieDetails(${JSON.stringify(item).replace(/"/g, '&quot;')})">
+      <button class="card-fav-btn ${fav ? 'active' : ''}" style="top: 8px; left: 8px;" onclick="event.stopPropagation(); toggleFavoriteItem(${JSON.stringify(item).replace(/"/g, '&quot;')})" title="${fav ? 'Удалить из списка' : 'В Мой список'}">
+        ${fav ? '★' : '＋'}
+      </button>
       <div class="grid-card-poster-wrap">
         <img src="${cardImg}" class="grid-card-poster-img" alt="${escapeHtml(item.title)}" onerror="this.onerror=null; this.src=generateCardSvg('${escapeJs(item.title)}', '${escapeJs(cardYear)}', '${escapeJs(item.quality || 'HD')}');">
         <div class="grid-card-hover-overlay">
@@ -943,11 +1420,12 @@ function renderCanvasCardHtml(item) {
 
 function renderCanvasItems() {
   if (!canvasContainer) return;
-  if (!state.canvasItems || state.canvasItems.length === 0) {
-    canvasContainer.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding: 40px; color:#888;">Загрузка полотна фильмов...</div>';
+  const filtered = getFilteredAndSortedItems(state.canvasItems);
+  if (!filtered || filtered.length === 0) {
+    canvasContainer.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding: 60px 20px; color:#888;">По выбранным фильтрам ничего не найдено</div>';
     return;
   }
-  canvasContainer.innerHTML = state.canvasItems.map(item => renderCanvasCardHtml(item)).join('');
+  canvasContainer.innerHTML = filtered.map(item => renderCanvasCardHtml(item)).join('');
 }
 
 async function loadMoreCanvasItems() {
@@ -981,6 +1459,11 @@ async function loadMoreCanvasItems() {
 }
 
 function switchCategory(cat) {
+  if (cat === 'favorites') {
+    openFavoritesView();
+    return;
+  }
+
   state.currentCategory = cat;
   state.canvasPage = 1;
 
@@ -1086,6 +1569,9 @@ function switchCategory(cat) {
   if (state.viewMode === 'canvas') {
     renderCanvasItems();
   }
+
+  renderContinueWatching();
+  updateCardFavoriteButtons();
 }
 
 async function performSearch(query) {
@@ -1191,6 +1677,7 @@ async function openMovieDetails(movie) {
   modalEditionsList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">Загрузка проверенных раздач с RuTracker...</div>';
   movieDetailModal.style.display = 'flex';
   checkActiveMovieDownloadStatus();
+  updateModalFavButton();
   startDownloadsPolling();
 
   // Search live torrents for this movie
@@ -1241,6 +1728,7 @@ function openMovieDetailsWithTorrents(movie, verified, allResults) {
   modalEpisodesSection.style.display = 'none';
   movieDetailModal.style.display = 'flex';
   checkActiveMovieDownloadStatus();
+  updateModalFavButton();
   startDownloadsPolling();
   renderModalEditions(verified, allResults);
 
@@ -1988,6 +2476,8 @@ async function loadAudioTracks(hash, fileId) {
     const data = await res.json();
     state.audioTracks = data.audio_tracks || [];
     renderAudioTracksMenu();
+    state.subtitleTracks = data.subtitle_tracks || [];
+    renderSubtitlesMenu();
     if (data.duration && data.duration > 30) {
       state.mediaDuration = Math.round(data.duration);
       playerDuration.textContent = formatTime(state.mediaDuration);
@@ -1996,6 +2486,67 @@ async function loadAudioTracks(hash, fileId) {
   } catch (e) {
     console.log('Tracks probe notice:', e);
   }
+}
+
+function renderSubtitlesMenu() {
+  const container = document.getElementById('subtitlesList');
+  if (!container) return;
+
+  if (!state.subtitleTracks || state.subtitleTracks.length === 0) {
+    container.innerHTML = '<div style="padding: 10px 14px; color: #888; font-size: 0.82rem; text-align: center;">Субтитры отсутствуют в раздаче</div>';
+    return;
+  }
+
+  container.innerHTML = state.subtitleTracks.map((sub, idx) => `
+    <div class="n-drop-item ${sub.id === state.activeSubtitleTrack ? 'active' : ''}" onclick="selectSubtitleTrack(${sub.id})">
+      💬 ${sub.lang ? `[${sub.lang.toUpperCase()}] ` : ''}${escapeHtml(sub.title || 'Субтитры ' + (idx + 1))}
+      <small style="opacity:0.7;"> (${sub.codec})</small>
+    </div>
+  `).join('');
+}
+
+function selectSubtitleTrack(subId) {
+  state.activeSubtitleTrack = subId;
+  const oldTrack = document.getElementById('kinoflixSubtitleTrack');
+  if (oldTrack) oldTrack.remove();
+
+  document.querySelectorAll('#playerSubMenu .n-drop-item').forEach(el => el.classList.remove('active'));
+  const offEl = document.getElementById('subTrackOff');
+
+  if (subId < 0) {
+    if (offEl) offEl.classList.add('active');
+    showToast('Субтитры выключены', 'info');
+    if (playerSubMenu) playerSubMenu.style.display = 'none';
+    return;
+  }
+
+  const track = state.subtitleTracks.find(s => s.id === subId);
+  const trackTitle = track ? (track.title || track.lang || `Субтитры ${subId + 1}`) : `Субтитры ${subId + 1}`;
+
+  const trackEl = document.createElement('track');
+  trackEl.id = 'kinoflixSubtitleTrack';
+  trackEl.kind = 'subtitles';
+  trackEl.label = trackTitle;
+  trackEl.srclang = (track && track.lang) || 'ru';
+  trackEl.src = `/api/stream/subtitles?link=${encodeURIComponent(state.activeTorrentHash)}&index=${state.activeFileIndex}&sub_id=${subId}`;
+  trackEl.default = true;
+
+  netflixVideo.appendChild(trackEl);
+  if (netflixVideo.textTracks && netflixVideo.textTracks[0]) {
+    netflixVideo.textTracks[0].mode = 'showing';
+  }
+
+  renderSubtitlesMenu();
+  showToast(`Субтитры: ${trackTitle}`, 'success');
+  if (playerSubMenu) playerSubMenu.style.display = 'none';
+}
+
+function toggleSubDropdown() {
+  if (!playerSubMenu) return;
+  const isHidden = playerSubMenu.style.display === 'none';
+  if (playerAudioMenu) playerAudioMenu.style.display = 'none';
+  if (playerSpeedMenu) playerSpeedMenu.style.display = 'none';
+  playerSubMenu.style.display = isHidden ? 'block' : 'none';
 }
 
 function renderAudioTracksMenu() {
@@ -2204,7 +2755,9 @@ async function exitNetflixPlayer() {
   if (playerEpisodesDrawer) playerEpisodesDrawer.style.display = 'none';
   if (playerReleaseDrawer) playerReleaseDrawer.style.display = 'none';
   if (playerAudioMenu) playerAudioMenu.style.display = 'none';
+  if (playerSubMenu) playerSubMenu.style.display = 'none';
   if (playerSpeedMenu) playerSpeedMenu.style.display = 'none';
+  if (skipIntroBtn) skipIntroBtn.style.display = 'none';
 
   if (playerHealthPill) {
     playerHealthPill.classList.remove('warning-state');
@@ -2279,6 +2832,9 @@ function setupPlayerEventListeners() {
   document.addEventListener('click', (e) => {
     if (!e.target.closest('#playerAudioBtn') && !e.target.closest('#playerAudioMenu')) {
       if (playerAudioMenu) playerAudioMenu.style.display = 'none';
+    }
+    if (!e.target.closest('#playerSubBtn') && !e.target.closest('#playerSubMenu')) {
+      if (playerSubMenu) playerSubMenu.style.display = 'none';
     }
     if (!e.target.closest('#playerSpeedBtn') && !e.target.closest('#playerSpeedMenu')) {
       if (playerSpeedMenu) playerSpeedMenu.style.display = 'none';
@@ -2371,6 +2927,13 @@ function seekRelative(seconds) {
   triggerRipple(seconds > 0 ? `+${seconds}` : `${seconds}`);
 }
 
+function skipIntroAction() {
+  seekRelative(85);
+  triggerRipple('+85s');
+  if (skipIntroBtn) skipIntroBtn.style.display = 'none';
+  showToast('Заставка пропущена (+85 сек)', 'info');
+}
+
 function updateProgress() {
   const cur = getEffectiveCurrentTime();
   const dur = getEffectiveDuration();
@@ -2381,6 +2944,20 @@ function updateProgress() {
     const percent = Math.min(100, Math.max(0, (cur / dur) * 100));
     playerProgressPlayed.style.width = `${percent}%`;
     playerScrubberHandle.style.left = `${percent}%`;
+
+    // Save continue watching
+    if (dur > 30 && cur > 5 && (dur - cur > 15)) {
+      saveContinueWatchingProgress(cur, dur);
+    }
+  }
+
+  // Skip Intro button visibility (during first 2 minutes)
+  if (skipIntroBtn) {
+    if (cur >= 5 && cur <= 125) {
+      skipIntroBtn.style.display = 'flex';
+    } else {
+      skipIntroBtn.style.display = 'none';
+    }
   }
 }
 
@@ -2673,6 +3250,21 @@ function setupKeyboardShortcuts() {
         case 'm':
           e.preventDefault();
           toggleMute();
+          break;
+        case 's':
+        case 'ы':
+          e.preventDefault();
+          skipIntroAction();
+          break;
+        case 'p':
+        case 'з':
+          e.preventDefault();
+          togglePictureInPicture();
+          break;
+        case 'c':
+        case 'с':
+          e.preventDefault();
+          toggleSubDropdown();
           break;
         case 'r':
         case 'к':

@@ -643,9 +643,32 @@ async def image_proxy(url: str):
 
 @app.get("/api/stream/tracks")
 async def stream_tracks(link: str, index: int = 1):
-    """Probe audio tracks and exact duration using ffprobe in non-blocking thread"""
+    """Probe audio tracks, subtitles and exact duration using ffprobe in non-blocking thread"""
     from backend.torrserver import probe_media_tracks
     return await asyncio.to_thread(probe_media_tracks, link, index)
+
+@app.get("/api/stream/subtitles")
+async def get_stream_subtitles(link: str, index: int = 1, sub_id: int = 0):
+    """Extract embedded subtitle track and stream as WebVTT on the fly"""
+    from backend.torrserver import TORRSERVER_URL
+    ffmpeg_bin = "/opt/homebrew/bin/ffmpeg" if os.path.exists("/opt/homebrew/bin/ffmpeg") else "ffmpeg"
+    torr_url = f"{TORRSERVER_URL}/stream?link={link}&index={index}&play"
+    cmd = [
+        ffmpeg_bin,
+        "-v", "quiet",
+        "-i", torr_url,
+        "-map", f"0:s:{sub_id}",
+        "-f", "webvtt",
+        "pipe:1"
+    ]
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        out, _ = proc.communicate(timeout=6.0)
+        if not out or not out.startswith(b"WEBVTT"):
+            out = b"WEBVTT\n\n"
+    except Exception:
+        out = b"WEBVTT\n\n"
+    return Response(content=out, media_type="text/vtt; charset=utf-8", headers={"Cache-Control": "no-cache"})
 
 @app.post("/api/settings/speed-limit")
 async def set_speed_limit(req: SpeedLimitRequest):

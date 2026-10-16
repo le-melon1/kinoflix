@@ -155,6 +155,7 @@ def probe_media_tracks(torrent_hash: str, index: int = 1) -> Dict[str, Any]:
         res = subprocess.check_output(cmd, timeout=4.0)
         data = json.loads(res)
         audio_tracks = []
+        subtitle_tracks = []
         video_codec = None
         pix_fmt = "yuv420p"
         width = 1920
@@ -177,6 +178,17 @@ def probe_media_tracks(torrent_hash: str, index: int = 1) -> Dict[str, Any]:
                     "lang": lang,
                     "needs_transcode": c.lower() not in ("aac", "mp3")
                 })
+            elif s.get("codec_type") == "subtitle":
+                idx = len(subtitle_tracks)
+                c = s.get("codec_name", "subrip")
+                title = s.get("tags", {}).get("title") or s.get("tags", {}).get("language") or f"Субтитры #{idx+1}"
+                lang = s.get("tags", {}).get("language", "rus")
+                subtitle_tracks.append({
+                    "id": idx,
+                    "codec": c,
+                    "title": title,
+                    "lang": lang
+                })
         duration = float(data.get("format", {}).get("duration", 0) or 0)
 
         if not video_codec:
@@ -192,7 +204,8 @@ def probe_media_tracks(torrent_hash: str, index: int = 1) -> Dict[str, Any]:
             "height": height,
             "filename": filename,
             "duration": duration,
-            "audio_tracks": audio_tracks
+            "audio_tracks": audio_tracks,
+            "subtitle_tracks": subtitle_tracks
         }
         _probe_cache[cache_key] = res_dict
         return res_dict
@@ -207,7 +220,8 @@ def probe_media_tracks(torrent_hash: str, index: int = 1) -> Dict[str, Any]:
             "duration": 0,
             "audio_tracks": [
                 {"id": 0, "codec": "aac", "title": "Основной звук (Русский дубляж)", "lang": "rus", "needs_transcode": True}
-            ]
+            ],
+            "subtitle_tracks": []
         }
         return fallback
 
