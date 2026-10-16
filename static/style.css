@@ -2267,3 +2267,342 @@ body.tv-mode .netflix-header {
   box-shadow: 0 2px 8px rgba(0,0,0,0.6);
 }
 
+/* --- VOICE CONTROL & VOICE SEARCH MODAL (🎙️) --- */
+.voice-search-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #fff;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+.voice-search-btn:hover {
+  background: rgba(229, 9, 20, 0.85);
+  border-color: var(--netflix-red);
+  box-shadow: 0 0 15px rgba(229, 9, 20, 0.6);
+  transform: scale(1.04);
+}
+.mic-icon-svg {
+  display: flex;
+  align-items: center;
+  color: #ff4757;
+}
+.voice-search-btn:hover .mic-icon-svg {
+  color: #fff;
+}
+
+.tv-voice-btn {
+  background: rgba(229, 9, 20, 0.25);
+  border: 1px solid rgba(229, 9, 20, 0.6);
+  color: #fff;
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.tv-voice-btn:hover,
+.tv-voice-btn.tv-focused {
+  background: var(--netflix-red) !important;
+  border-color: var(--netflix-red) !important;
+  outline: 3px solid #fff !important;
+  box-shadow: 0 0 20px rgba(229, 9, 20, 0.9) !important;
+  transform: scale(1.05) !important;
+}
+
+.voice-modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(7, 7, 7, 0.92);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  z-index: 10000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  animation: fadeIn 0.25s ease-out;
+}
+
+.voice-modal-card {
+  position: relative;
+  width: 92%;
+  max-width: 960px;
+  background: rgba(22, 22, 22, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 16px;
+  padding: 34px 28px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8), 0 0 40px rgba(229, 9, 20, 0.25);
+  text-align: center;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.voice-close-circle {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  background: rgba(255, 255, 255, 0.12);
+  border: none;
+  color: #fff;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  font-size: 1.1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+.voice-close-circle:hover {
+  background: var(--netflix-red);
+  transform: scale(1.1);
+}
+
+.voice-mic-container {
+  position: relative;
+  width: 90px;
+  height: 90px;
+  margin: 0 auto 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.voice-mic-orb {
+  position: relative;
+  z-index: 2;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--netflix-red);
+  border: none;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 0 25px rgba(229, 9, 20, 0.8);
+  transition: all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+.voice-mic-orb:hover {
+  transform: scale(1.08);
+  box-shadow: 0 0 35px rgba(229, 9, 20, 1);
+}
+.voice-mic-orb.listening {
+  animation: pulseMic 1.4s infinite ease-in-out;
+  background: #ff1e2d;
+}
+
+@keyframes pulseMic {
+  0% { transform: scale(1); box-shadow: 0 0 20px rgba(229, 9, 20, 0.8); }
+  50% { transform: scale(1.14); box-shadow: 0 0 45px rgba(255, 30, 45, 1); }
+  100% { transform: scale(1); box-shadow: 0 0 20px rgba(229, 9, 20, 0.8); }
+}
+
+.voice-mic-waves {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  display: none;
+}
+.voice-mic-waves.active {
+  display: block;
+}
+.wave-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 2px solid rgba(229, 9, 20, 0.7);
+  animation: waveExpand 2s infinite ease-out;
+}
+.wave-1 { width: 90px; height: 90px; animation-delay: 0s; }
+.wave-2 { width: 120px; height: 120px; animation-delay: 0.6s; }
+.wave-3 { width: 150px; height: 150px; animation-delay: 1.2s; }
+
+@keyframes waveExpand {
+  0% { transform: translate(-50%, -50%) scale(0.6); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1.4); opacity: 0; }
+}
+
+.voice-status-title {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #fff;
+  margin-bottom: 6px;
+}
+.voice-status-subtitle {
+  color: #bbb;
+  font-size: 0.95rem;
+  max-width: 600px;
+  margin: 0 auto 16px;
+}
+
+.voice-transcript-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1.5px solid rgba(229, 9, 20, 0.5);
+  border-radius: 30px;
+  padding: 8px 22px;
+  margin-bottom: 16px;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #fff;
+  box-shadow: 0 0 20px rgba(229, 9, 20, 0.3);
+}
+.voice-quote { color: var(--netflix-red); font-size: 1.4rem; }
+
+.voice-manual-wrap {
+  display: flex;
+  max-width: 480px;
+  margin: 0 auto 16px;
+  gap: 8px;
+}
+.voice-manual-wrap input {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  padding: 8px 14px;
+  color: #fff;
+  font-size: 0.95rem;
+}
+.voice-manual-wrap input:focus {
+  border-color: var(--netflix-red);
+  outline: none;
+}
+.voice-manual-search-btn {
+  background: var(--netflix-red);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.voice-choice-hint {
+  background: rgba(255, 204, 0, 0.12);
+  border: 1px solid rgba(255, 204, 0, 0.3);
+  color: #ffcc00;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 0.9rem;
+  margin-bottom: 20px;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Fast Voice Results Grid */
+.voice-results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  text-align: left;
+}
+
+.voice-card {
+  position: relative;
+  background: #181818;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  transition: all 0.2s cubic-bezier(0.165, 0.84, 0.44, 1);
+  display: flex;
+  flex-direction: column;
+}
+.voice-card:hover,
+.voice-card.voice-card-top {
+  border-color: var(--netflix-red);
+  box-shadow: 0 0 25px rgba(229, 9, 20, 0.6);
+  transform: translateY(-4px) scale(1.02);
+}
+.voice-card-choice-num {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: var(--netflix-red);
+  color: #fff;
+  font-weight: 900;
+  font-size: 0.85rem;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.8);
+}
+.voice-card-thumb-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16/9;
+  background: #222;
+  overflow: hidden;
+}
+.voice-card-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.voice-card-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  flex: 1;
+}
+.voice-card-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+.voice-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  color: #aaa;
+  margin-bottom: 8px;
+}
+.voice-card-play-btn {
+  background: #fff;
+  color: #000;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-weight: 800;
+  font-size: 0.85rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.2s;
+}
+.voice-card:hover .voice-card-play-btn {
+  background: var(--netflix-red);
+  color: #fff;
+}
+

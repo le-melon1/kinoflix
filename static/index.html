@@ -27,6 +27,17 @@
     </div>
 
     <div class="nav-right">
+      <!-- Voice Mode Button -->
+      <button class="voice-search-btn" id="voiceSearchBtn" onclick="openVoiceModal()" title="Голосовое управление (нажмите или нажмите V)">
+        <span class="mic-icon-svg">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+            <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+          </svg>
+        </span>
+        <span class="voice-btn-text">Голос</span>
+      </button>
+
       <!-- TV Mode Button -->
       <button class="tv-mode-btn" id="tvModeBtn" onclick="toggleTvMode()" title="Режим для ТВ (управление стрелками D-Pad)">
         📺 <span id="tvModeBtnText">Для ТВ</span>
@@ -187,6 +198,7 @@
         </div>
         <div class="tv-banner-right">
           <span class="tv-page-info" id="tvPageInfo">Страница 1</span>
+          <button class="tv-voice-btn" onclick="openVoiceModal()" title="Голосовое управление (нажмите или нажмите V)">🎙️ Сказать название [V]</button>
           <button class="tv-exit-btn" id="tvExitBtn" onclick="setTvMode(false)">Выход из ТВ режима (Esc)</button>
         </div>
       </div>
@@ -208,9 +220,10 @@
 
       <!-- TV Navigation bottom bar -->
       <div class="tv-bottom-nav">
-        <button class="tv-nav-btn" id="tvPrevBtn" onclick="tvPagePrev()">◀ Предыдущая страница</button>
-        <button class="tv-nav-btn" id="tvNextBtn" onclick="tvPageNext()">Следующая страница ▶</button>
-        <button class="tv-nav-btn" id="tvSearchBtn" onclick="tvOpenSearchPrompt()">🔍 Поиск фильма</button>
+        <button class="tv-nav-btn" id="tvPrevBtn" onclick="tvPagePrev()">◀ Предыдущая</button>
+        <button class="tv-nav-btn" id="tvNextBtn" onclick="tvPageNext()">Следующая ▶</button>
+        <button class="tv-nav-btn" id="tvVoiceNavBtn" onclick="openVoiceModal()" style="color: #ff4757; border-color: rgba(255, 71, 87, 0.4);">🎙️ Голос [V]</button>
+        <button class="tv-nav-btn" id="tvSearchBtn" onclick="tvOpenSearchPrompt()">🔍 Поиск</button>
       </div>
     </div>
 
@@ -602,6 +615,54 @@
 
         <button class="netflix-red-btn" onclick="saveSpeedLimits()">Применить настройки</button>
       </div>
+    </div>
+  </div>
+
+  <!-- VOICE CONTROL OVERLAY / MODAL (ГОЛОСОВОЕ УПРАВЛЕНИЕ 🎙️) -->
+  <div class="voice-modal-backdrop" id="voiceModal" style="display: none;" onclick="closeVoiceModalOnBackdrop(event)">
+    <div class="voice-modal-card">
+      <button class="voice-close-circle" onclick="closeVoiceModal()">✕</button>
+
+      <!-- Animated Mic Container -->
+      <div class="voice-mic-container">
+        <div class="voice-mic-waves" id="voiceMicWaves">
+          <div class="wave-ring wave-1"></div>
+          <div class="wave-ring wave-2"></div>
+          <div class="wave-ring wave-3"></div>
+        </div>
+        <button class="voice-mic-orb" id="voiceMicOrb" onclick="toggleVoiceListening()" title="Нажмите, чтобы включить/выключить микрофон">
+          <svg viewBox="0 0 24 24" width="34" height="34" fill="currentColor">
+            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+            <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+          </svg>
+        </button>
+      </div>
+
+      <h2 class="voice-status-title" id="voiceStatusTitle">Слушаю вас...</h2>
+      <p class="voice-status-subtitle" id="voiceStatusSubtitle">Произнесите название фильма или сериала (например: «Аркейн», «Дюна», «Интерстеллар»)</p>
+
+      <!-- Real-time Spoken Transcript Box -->
+      <div class="voice-transcript-box" id="voiceTranscriptBox" style="display: none;">
+        <span class="voice-quote">“</span>
+        <span class="voice-text" id="voiceTranscriptText">...</span>
+        <span class="voice-quote">”</span>
+      </div>
+
+      <!-- Quick Text Input Fallback -->
+      <div class="voice-manual-wrap" id="voiceManualWrap">
+        <input type="text" id="voiceManualInput" placeholder="Или напишите название фильма здесь..." onkeydown="if(event.key==='Enter') executeVoiceSearch(this.value)">
+        <button class="voice-manual-search-btn" onclick="executeVoiceSearch(document.getElementById('voiceManualInput').value)">
+          Найти
+        </button>
+      </div>
+
+      <!-- Voice Choice Prompt & Shortcuts -->
+      <div class="voice-choice-hint" id="voiceChoiceHint" style="display: none;">
+        <span>💡 <strong>Как запустить:</strong> Нажмите на фильм, скажите <em>«первый» / «второй»</em>, либо нажмите цифру <strong>1–4</strong> на клавиатуре — запуск мгновенный!</span>
+      </div>
+
+      <!-- Voice Search Results Grid -->
+      <div class="voice-results-grid" id="voiceResultsGrid"></div>
     </div>
   </div>
 

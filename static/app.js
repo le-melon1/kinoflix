@@ -1880,6 +1880,40 @@ function setupKeyboardShortcuts() {
       return;
     }
 
+    // Voice Modal Controls (Key 'V' to toggle, Esc to close, 1-5 to launch, Enter to play top match)
+    const voiceModal = document.getElementById('voiceModal');
+    if (voiceModal && voiceModal.style.display !== 'none') {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeVoiceModal();
+        return;
+      }
+      if (['1', '2', '3', '4', '5'].includes(e.key)) {
+        const idx = parseInt(e.key) - 1;
+        if (_voiceResults && _voiceResults[idx]) {
+          e.preventDefault();
+          launchMovieDirectly(_voiceResults[idx]);
+          return;
+        }
+      }
+      if (e.key === 'Enter' && _voiceResults && _voiceResults.length > 0) {
+        e.preventDefault();
+        launchMovieDirectly(_voiceResults[0]);
+        return;
+      }
+    }
+
+    // Global Key 'V' opens Voice Search Mode
+    if (e.key.toLowerCase() === 'v' && (!netflixPlayerView || netflixPlayerView.style.display !== 'flex')) {
+      e.preventDefault();
+      if (voiceModal && voiceModal.style.display !== 'none') {
+        closeVoiceModal();
+      } else {
+        openVoiceModal();
+      }
+      return;
+    }
+
     // Smart TV Mode: Remote D-Pad Navigation (Arrow keys + Enter + Esc)
     if (state.tvMode) {
       if (netflixPlayerView.style.display !== 'flex' && movieDetailModal.style.display !== 'flex') {
@@ -2131,6 +2165,348 @@ function escapeHtml(str) {
             .replace(/'/g, '&#039;');
 }
 
+// --- VOICE CONTROL SYSTEM (🎙️ ГОЛОСОВОЙ ПОИСК И МГНОВЕННЫЙ ЗАПУСК) ---
+let _voiceRecog = null;
+let _isVoiceListening = false;
+let _voiceResults = [];
+let _voiceAutoRestartTimer = null;
+
+function initVoiceRecognition() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    return null;
+  }
+  const recog = new SpeechRecognition();
+  recog.lang = 'ru-RU';
+  recog.interimResults = true;
+  recog.maxAlternatives = 1;
+  recog.continuous = false;
+
+  recog.onstart = () => {
+    _isVoiceListening = true;
+    updateVoiceMicUI(true);
+  };
+
+  recog.onresult = (event) => {
+    let interimText = '';
+    let finalText = '';
+
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+      const trans = event.results[i][0].transcript;
+      if (event.results[i].isFinal) {
+        finalText += trans;
+      } else {
+        interimText += trans;
+      }
+    }
+
+    const liveText = finalText || interimText;
+    if (liveText) {
+      showVoiceTranscript(liveText);
+    }
+
+    if (finalText) {
+      handleFinalVoiceInput(finalText.trim());
+    }
+  };
+
+  recog.onerror = (event) => {
+    console.warn('Voice recognition notice:', event.error);
+    _isVoiceListening = false;
+    updateVoiceMicUI(false);
+    if (event.error === 'not-allowed') {
+      const sub = document.getElementById('voiceStatusSubtitle');
+      if (sub) sub.textContent = 'Доступ к микрофону заблокирован в браузере. Разрешите микрофон или введите название фильма вручную.';
+    }
+  };
+
+  recog.onend = () => {
+    _isVoiceListening = false;
+    updateVoiceMicUI(false);
+  };
+
+  return recog;
+}
+
+function openVoiceModal() {
+  const modal = document.getElementById('voiceModal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  _voiceResults = [];
+  const resultsGrid = document.getElementById('voiceResultsGrid');
+  if (resultsGrid) resultsGrid.innerHTML = '';
+  const hint = document.getElementById('voiceChoiceHint');
+  if (hint) hint.style.display = 'none';
+
+  const title = document.getElementById('voiceStatusTitle');
+  if (title) title.textContent = 'Слушаю вас...';
+  const subtitle = document.getElementById('voiceStatusSubtitle');
+  if (subtitle) subtitle.textContent = 'Произнесите название фильма или сериала (например: «Аркейн», «Дюна», «Интерстеллар»)';
+  const transcriptBox = document.getElementById('voiceTranscriptBox');
+  if (transcriptBox) transcriptBox.style.display = 'none';
+  const manualInput = document.getElementById('voiceManualInput');
+  if (manualInput) manualInput.value = '';
+
+  startVoiceListening();
+}
+
+function closeVoiceModal() {
+  stopVoiceListening();
+  const modal = document.getElementById('voiceModal');
+  if (modal) modal.style.display = 'none';
+  _voiceResults = [];
+}
+
+function closeVoiceModalOnBackdrop(e) {
+  if (e.target && e.target.id === 'voiceModal') {
+    closeVoiceModal();
+  }
+}
+
+function toggleVoiceListening() {
+  if (_isVoiceListening) {
+    stopVoiceListening();
+  } else {
+    startVoiceListening();
+  }
+}
+
+function startVoiceListening() {
+  if (!_voiceRecog) {
+    _voiceRecog = initVoiceRecognition();
+  }
+  if (!_voiceRecog) {
+    const sub = document.getElementById('voiceStatusSubtitle');
+    if (sub) sub.textContent = 'Голосовой ввод не поддерживается данным браузером. Введите название фильма в поле ниже:';
+    const input = document.getElementById('voiceManualInput');
+    if (input) input.focus();
+    return;
+  }
+  try {
+    _voiceRecog.start();
+  } catch (err) {
+    // Already active or restarting
+  }
+}
+
+function stopVoiceListening() {
+  if (_voiceAutoRestartTimer) {
+    clearTimeout(_voiceAutoRestartTimer);
+    _voiceAutoRestartTimer = null;
+  }
+  if (_voiceRecog && _isVoiceListening) {
+    try {
+      _voiceRecog.stop();
+    } catch (_) {}
+  }
+  _isVoiceListening = false;
+  updateVoiceMicUI(false);
+}
+
+function updateVoiceMicUI(listening) {
+  const orb = document.getElementById('voiceMicOrb');
+  const waves = document.getElementById('voiceMicWaves');
+  if (orb) orb.classList.toggle('listening', listening);
+  if (waves) waves.classList.toggle('active', listening);
+}
+
+function showVoiceTranscript(text) {
+  const box = document.getElementById('voiceTranscriptBox');
+  const label = document.getElementById('voiceTranscriptText');
+  if (box && label) {
+    box.style.display = 'inline-flex';
+    label.textContent = text;
+  }
+}
+
+function parseVoiceSelection(text) {
+  const clean = text.toLowerCase().trim();
+  const map = {
+    'первый': 0, 'первое': 0, 'первая': 0, 'один': 0, '1': 0,
+    'второй': 1, 'второе': 1, 'вторая': 1, 'два': 1, '2': 1,
+    'третий': 2, 'третье': 2, 'третья': 2, 'три': 2, '3': 2,
+    'четвертый': 3, 'четвертое': 3, 'четвертая': 3, 'четыре': 3, '4': 3,
+    'пятый': 4, 'пятое': 4, 'пятая': 4, 'пять': 4, '5': 4,
+    'запусти': 0, 'включи': 0, 'играй': 0, 'смотреть': 0, 'давай': 0
+  };
+  for (const [key, idx] of Object.entries(map)) {
+    if (clean === key || clean.startsWith(key + ' ') || clean.endsWith(' ' + key)) return idx;
+  }
+  return -1;
+}
+
+async function handleFinalVoiceInput(spokenText) {
+  if (!spokenText) return;
+
+  // If choices are already displayed, check if the user said a selection ("первый", "второй", "1", "2")
+  if (_voiceResults && _voiceResults.length > 0) {
+    const choiceIdx = parseVoiceSelection(spokenText);
+    if (choiceIdx >= 0 && choiceIdx < _voiceResults.length) {
+      launchMovieDirectly(_voiceResults[choiceIdx]);
+      return;
+    }
+  }
+
+  // Otherwise, treat as a film search query
+  await executeVoiceSearch(spokenText);
+}
+
+async function executeVoiceSearch(query) {
+  if (!query || !query.trim()) return;
+  const q = query.trim();
+  stopVoiceListening();
+
+  showVoiceTranscript(q);
+  const statusTitle = document.getElementById('voiceStatusTitle');
+  if (statusTitle) statusTitle.textContent = `Поиск: «${q}»...`;
+  const statusSub = document.getElementById('voiceStatusSubtitle');
+  if (statusSub) statusSub.textContent = 'Ищем лучшие раздачи с высоким качеством и звуком...';
+
+  const grid = document.getElementById('voiceResultsGrid');
+  if (grid) {
+    grid.innerHTML = `
+      <div style="grid-column: 1/-1; padding: 36px; text-align: center; color: #aaa;">
+        <div class="netflix-spinner-circle" style="width: 36px; height: 36px; margin: 0 auto 12px;"></div>
+        Поиск фильма «${escapeHtml(q)}»...
+      </div>
+    `;
+  }
+
+  try {
+    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&source=all`);
+    const data = await res.json();
+    const verified = data.verified_editions || [];
+    const results = data.results || [];
+    const movieMeta = data.movie;
+
+    const candidates = [];
+    const seen = new Set();
+
+    // 1. Add verified editions first (Multi-season pack, Latest season, 1080p BD)
+    for (const v of verified) {
+      const key = v.id || v.title;
+      if (!seen.has(key)) {
+        seen.add(key);
+        candidates.push({
+          id: v.id,
+          title: v.season_label ? `${movieMeta?.title || v.title} • ${v.season_label}` : (v.curated_category || v.title),
+          poster: v.poster || movieMeta?.poster,
+          backdrop: v.backdrop || movieMeta?.backdrop,
+          year: v.display_year || movieMeta?.year || '2024',
+          rating: movieMeta?.rating || '8.8',
+          quality: v.quality || 'Full HD',
+          seeds: v.seeds,
+          badge: v.curated_badge || '⭐ ПРОВЕРЕННАЯ РАЗДАЧА',
+          torrent_item: v
+        });
+      }
+    }
+
+    // 2. Add top releases from results
+    for (const r of results) {
+      const key = r.id || r.title;
+      if (!seen.has(key) && candidates.length < 5) {
+        seen.add(key);
+        candidates.push({
+          id: r.id,
+          title: r.display_title || r.title,
+          poster: r.poster || movieMeta?.poster,
+          backdrop: r.backdrop || movieMeta?.backdrop,
+          year: r.display_year || r.date || '2024',
+          rating: r.rating || movieMeta?.rating || '8.5',
+          quality: r.quality || 'HD',
+          seeds: r.seeds,
+          badge: r.season_label || `${r.seeds} сидов`,
+          torrent_item: r
+        });
+      }
+    }
+
+    _voiceResults = candidates;
+
+    if (!candidates.length) {
+      if (statusTitle) statusTitle.textContent = `По запросу «${q}» ничего не найдено`;
+      if (statusSub) statusSub.textContent = 'Попробуйте произнести название иначе или воспользуйтесь строкой ввода.';
+      if (grid) grid.innerHTML = '<div style="grid-column: 1/-1; padding: 20px; color: #888;">Раздачи не найдены. Нажмите на микрофон и попробуйте снова.</div>';
+      return;
+    }
+
+    if (statusTitle) statusTitle.textContent = `Выберите вариант:`;
+    if (statusSub) statusSub.textContent = `Найдено вариантов: ${candidates.length}. Фильм запустится сразу после выбора!`;
+    const hint = document.getElementById('voiceChoiceHint');
+    if (hint) hint.style.display = 'flex';
+
+    if (grid) {
+      grid.innerHTML = candidates.map((item, idx) => {
+        const choiceNum = idx + 1;
+        const img = item.backdrop || item.poster || generateCardSvg(item.title, item.year, item.quality);
+        const isTop = (idx === 0);
+        return `
+          <div class="voice-card ${isTop ? 'voice-card-top' : ''}" onclick="launchMovieDirectly(_voiceResults[${idx}])" id="voiceCard_${idx}">
+            <div class="voice-card-choice-num">${choiceNum}</div>
+            <div class="voice-card-thumb-wrap">
+              <img src="${img}" alt="${escapeHtml(item.title)}" class="voice-card-img" onerror="this.onerror=null; this.src=generateCardSvg('${escapeJs(item.title)}', '${item.year || ''}', '${item.quality || 'HD'}');">
+            </div>
+            <div class="voice-card-body">
+              <div class="voice-card-title">${escapeHtml(item.title)}</div>
+              <div class="voice-card-meta">
+                <span style="color:#ffcc00; font-weight:800;">★ ${item.rating || '8.8'}</span>
+                <span>${item.year}</span>
+                <span class="quality-badge">${escapeHtml(item.quality || 'HD')}</span>
+              </div>
+              <button class="voice-card-play-btn" onclick="event.stopPropagation(); launchMovieDirectly(_voiceResults[${idx}])">
+                ▶ Запустить [${choiceNum}]
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // Auto-listen for choice command ("первый", "второй", "1", "2") after 600ms
+    _voiceAutoRestartTimer = setTimeout(() => {
+      startVoiceListening();
+    }, 600);
+
+  } catch (err) {
+    if (statusTitle) statusTitle.textContent = 'Ошибка поиска';
+    if (statusSub) statusSub.textContent = err.message;
+    if (grid) grid.innerHTML = `<div style="grid-column: 1/-1; color: #ff6b6b; padding: 20px;">${err.message}</div>`;
+  }
+}
+
+async function launchMovieDirectly(item) {
+  closeVoiceModal();
+  if (!item) return;
+
+  const torrentItem = item.torrent_item || item;
+  if (torrentItem && (torrentItem.magnet || torrentItem.topic_id)) {
+    startNetflixStream(torrentItem);
+    return;
+  }
+
+  // Fallback if item is plain metadata
+  const q = item.search_query || item.title;
+  netflixPlayerView.style.display = 'flex';
+  playerTitle.textContent = item.title;
+  playerSubtitle.textContent = 'Мгновенный запуск фильма в обход VPN...';
+  playerSpinner.style.display = 'flex';
+  spinnerText.textContent = `Подключение к «${item.title}»...`;
+
+  try {
+    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&source=all`);
+    const data = await res.json();
+    const verified = data.verified_editions || [];
+    const results = data.results || [];
+    const top = verified.find(r => r.is_multi_season) || verified[0] || results[0];
+    if (!top) throw new Error('Раздачи не найдены');
+    startNetflixStream(top);
+  } catch (e) {
+    alert('Не удалось запустить фильм: ' + e.message);
+    exitNetflixPlayer();
+  }
+}
+
 // --- SMART TV MODE ENGINE (REMOTE / ARROWS / NUMBERS 0-9) ---
 function toggleTvMode() {
   setTvMode(!state.tvMode);
@@ -2311,6 +2687,7 @@ function updateTvFocus() {
   const bottomBtns = [
     document.getElementById('tvPrevBtn'),
     document.getElementById('tvNextBtn'),
+    document.getElementById('tvVoiceNavBtn'),
     document.getElementById('tvSearchBtn')
   ];
   bottomBtns.forEach(b => { if (b) b.classList.remove('tv-focused'); });
@@ -2416,10 +2793,12 @@ function handleTvArrowKey(key) {
         state.tvZone = 'bottom';
         if (col <= 1) {
           state.tvBottomIndex = 0; // Prev
-        } else if (col <= 3) {
+        } else if (col === 2) {
           state.tvBottomIndex = 1; // Next
+        } else if (col === 3) {
+          state.tvBottomIndex = 2; // Voice
         } else {
-          state.tvBottomIndex = 2; // Search
+          state.tvBottomIndex = 3; // Search
         }
       }
     }
@@ -2477,13 +2856,13 @@ function handleTvArrowKey(key) {
     if (key === 'ArrowLeft') {
       if (state.tvBottomIndex > 0) state.tvBottomIndex--;
     } else if (key === 'ArrowRight') {
-      if (state.tvBottomIndex < 2) state.tvBottomIndex++;
+      if (state.tvBottomIndex < 3) state.tvBottomIndex++;
     } else if (key === 'ArrowUp') {
       // Move UP into the bottom row of cards!
       if (N > 0) {
         state.tvZone = 'cards';
         const lastRowStart = (totalRows - 1) * cols;
-        const targetCol = (state.tvBottomIndex === 0) ? 0 : (state.tvBottomIndex === 1 ? Math.min(2, cols - 1) : cols - 1);
+        const targetCol = (state.tvBottomIndex === 0) ? 0 : (state.tvBottomIndex === 1 ? 1 : (state.tvBottomIndex === 2 ? 3 : cols - 1));
         state.tvFocusIndex = Math.min(N - 1, lastRowStart + targetCol);
       } else {
         state.tvZone = 'tabs';
@@ -2512,6 +2891,8 @@ function handleTvEnter() {
     } else if (state.tvBottomIndex === 1) {
       tvPageNext();
     } else if (state.tvBottomIndex === 2) {
+      openVoiceModal();
+    } else if (state.tvBottomIndex === 3) {
       tvOpenSearchPrompt();
     }
   }
