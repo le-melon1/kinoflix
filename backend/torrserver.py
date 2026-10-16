@@ -109,6 +109,16 @@ def probe_media_tracks(torrent_hash: str, index: int = 1) -> Dict[str, Any]:
     if cache_key in _probe_cache:
         return _probe_cache[cache_key]
 
+    filename = ""
+    try:
+        r = httpx.post(f"{TORRSERVER_URL}/torrents", json={"action": "get", "hash": torrent_hash}, timeout=1.0)
+        for f in r.json().get("file_stats", []):
+            if f.get("id") == index:
+                filename = f.get("path", "")
+                break
+    except Exception:
+        pass
+
     url = f"{TORRSERVER_URL}/stream?link={torrent_hash}&index={index}&play"
     ffprobe_bin = "/opt/homebrew/bin/ffprobe" if os.path.exists("/opt/homebrew/bin/ffprobe") else "ffprobe"
     cmd = [
@@ -117,18 +127,24 @@ def probe_media_tracks(torrent_hash: str, index: int = 1) -> Dict[str, Any]:
         "-print_format", "json",
         "-show_streams",
         "-show_format",
-        "-probesize", "1000000",
-        "-analyzeduration", "1000000",
+        "-probesize", "1500000",
+        "-analyzeduration", "1500000",
         url
     ]
     try:
         res = subprocess.check_output(cmd, timeout=4.0)
         data = json.loads(res)
         audio_tracks = []
-        video_codec = "h264"
+        video_codec = None
+        pix_fmt = "yuv420p"
+        width = 1920
+        height = 1080
         for s in data.get("streams", []):
-            if s.get("codec_type") == "video" and video_codec == "h264":
-                video_codec = s.get("codec_name", "h264")
+            if s.get("codec_type") == "video" and not video_codec:
+                video_codec = (s.get("codec_name") or "").lower()
+                pix_fmt = (s.get("pix_fmt") or "yuv420p").lower()
+                width = int(s.get("width") or 1920)
+                height = int(s.get("height") or 1080)
             elif s.get("codec_type") == "audio":
                 idx = len(audio_tracks)
                 c = s.get("codec_name", "ac3")
@@ -142,16 +158,32 @@ def probe_media_tracks(torrent_hash: str, index: int = 1) -> Dict[str, Any]:
                     "needs_transcode": c.lower() not in ("aac", "mp3")
                 })
         duration = float(data.get("format", {}).get("duration", 0) or 0)
+
+        if not video_codec:
+            if filename.lower().endswith((".avi", ".wmv", ".flv", ".vob", ".mpg", ".mpeg", ".divx")):
+                video_codec = "mpeg4"
+            else:
+                video_codec = "h264"
+
         res_dict = {
             "video_codec": video_codec,
+            "pix_fmt": pix_fmt,
+            "width": width,
+            "height": height,
+            "filename": filename,
             "duration": duration,
             "audio_tracks": audio_tracks
         }
         _probe_cache[cache_key] = res_dict
         return res_dict
     except Exception as e:
+        is_legacy = filename.lower().endswith((".avi", ".wmv", ".flv", ".vob", ".mpg", ".mpeg", ".divx"))
         fallback = {
-            "video_codec": "h264",
+            "video_codec": "mpeg4" if is_legacy else "h264",
+            "pix_fmt": "yuv420p",
+            "width": 1920,
+            "height": 1080,
+            "filename": filename,
             "duration": 0,
             "audio_tracks": [
                 {"id": 0, "codec": "aac", "title": "Основной звук (Русский дубляж)", "lang": "rus", "needs_transcode": True}

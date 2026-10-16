@@ -1,4 +1,5 @@
 import os
+import sys
 import re
 import asyncio
 import urllib.parse
@@ -428,12 +429,37 @@ async def stream_browser_audio(
         if not tracks:
             tracks = await asyncio.to_thread(probe_media_tracks, link, index)
             
-        v_codec = (tracks.get("video_codec") or "h264").lower()
-        if v_codec in ("hevc", "h265"):
-            # Apple Silicon hardware encoding: HEVC -> H.264 instant playback in Chrome
-            video_args = ["-c:v", "h264_videotoolbox", "-b:v", "6000k", "-pix_fmt", "yuv420p"]
-        else:
+        v_codec = (tracks.get("video_codec") or "").lower()
+        pix_fmt = (tracks.get("pix_fmt") or "yuv420p").lower()
+        fname = (tracks.get("filename") or "").lower()
+
+        # Check if video is safe for direct copy into Google Chrome:
+        # Chrome ONLY natively plays 8-bit H.264 (yuv420p).
+        # Any XviD/MPEG-4 (House M.D.), HEVC, VC-1, MPEG-2, or 10-bit H.264 will show a black screen in Chrome if copied.
+        is_h264 = v_codec in ("h264", "avc", "avc1")
+        is_8bit = "10" not in pix_fmt and "12" not in pix_fmt and "16" not in pix_fmt
+        is_safe_container = not fname.endswith((".avi", ".wmv", ".vob", ".flv", ".mpg", ".mpeg", ".divx"))
+
+        if is_h264 and is_8bit and is_safe_container:
             video_args = ["-c:v", "copy"]
+        else:
+            # VideoToolbox hardware encoder on macOS - 15x real-time speed, 0% CPU!
+            # Eliminates black screen for XviD/AVI (Доктор Хаус), HEVC, 10-bit anime, etc.
+            if os.path.exists("/opt/homebrew/bin/ffmpeg"):
+                video_args = [
+                    "-c:v", "h264_videotoolbox",
+                    "-b:v", "4500k",
+                    "-pix_fmt", "yuv420p",
+                    "-realtime", "true"
+                ]
+            else:
+                video_args = [
+                    "-c:v", "libx264",
+                    "-preset", "ultrafast",
+                    "-tune", "zerolatency",
+                    "-b:v", "4000k",
+                    "-pix_fmt", "yuv420p"
+                ]
 
         if audio_idx is None:
             audio_tracks = tracks.get("audio_tracks", [])
@@ -448,7 +474,25 @@ async def stream_browser_audio(
     except Exception:
         if audio_idx is None:
             audio_idx = 0
-        video_args = ["-c:v", "copy"]
+        fname = ""
+        try:
+            r = httpx.post("http://127.0.0.1:8090/torrents", json={"action": "get", "hash": link}, timeout=1.0)
+            for f in r.json().get("file_stats", []):
+                if f.get("id") == index:
+                    fname = f.get("path", "").lower()
+                    break
+        except Exception:
+            pass
+
+        if fname.endswith((".avi", ".wmv", ".vob", ".flv", ".mpg", ".mpeg", ".divx")):
+            video_args = [
+                "-c:v", "h264_videotoolbox",
+                "-b:v", "4500k",
+                "-pix_fmt", "yuv420p",
+                "-realtime", "true"
+            ]
+        else:
+            video_args = ["-c:v", "copy"]
 
     cmd = [
         ffmpeg_bin,
