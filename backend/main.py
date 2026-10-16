@@ -328,9 +328,9 @@ async def get_dubbing_options(
         (r'\bflarrow\b', 'Flarrow Films'),
         (r'\b(сыендук|sndk)\b', 'Сыендук'),
         (r'\b(iyuno|невафильм|пифагор)\b', 'Официальный дубляж (Лицензия)'),
-        (r'\b(дубляж|дублирован)\b', 'Полный дубляж (Лицензия)'),
-        (r'\bmvo\b', 'Профессиональный многоголосый (MVO)'),
-        (r'\bdvo\b', 'Двухголосый закадровый (DVO)'),
+        (r'(\bдубляж\b|\bдублирован\b|\|\s*d\s*\||\bлицензи)', 'Полный дубляж (Лицензия)'),
+        (r'(\bmvo\b|\|\s*p\s*\||\bмногоголос)', 'Профессиональный многоголосый (MVO)'),
+        (r'(\bdvo\b|\|\s*dvo\s*\||\bдвухголос)', 'Двухголосый закадровый (DVO)'),
     ]
 
     results = await search_rutor(clean_q, limit=40, min_seeds=1)
@@ -359,20 +359,30 @@ async def get_dubbing_options(
         if current_hash and hash_val and current_hash.lower() == hash_val.lower():
             is_active = True
 
+        q = r.get("quality", "HD")
+        size = r.get("size", "")
+
         for studio in studios_in_rel:
-            full_key = f"{studio}_{s_label or 'all'}"
+            full_key = f"{studio}_{q}_{s_label or 'movie'}_{size}"
             if full_key not in seen_studios:
                 seen_studios.add(full_key)
+                name_parts = [studio]
+                if s_label:
+                    name_parts.append(s_label)
+                if q:
+                    name_parts.append(q)
+                display_label = " • ".join(name_parts)
+
                 options.append({
                     "id": r["id"],
                     "hash": hash_val,
                     "studio": studio,
                     "season_label": s_label,
-                    "display_name": f"{studio}{(' • ' + s_label) if s_label else ''}",
+                    "display_name": display_label,
                     "title": t,
-                    "quality": r.get("quality", "HD"),
+                    "quality": q,
                     "seeds": r.get("seeds", 0),
-                    "size": r.get("size", ""),
+                    "size": size,
                     "magnet": magnet,
                     "source": r.get("source", "Rutor"),
                     "is_active": is_active
@@ -383,7 +393,7 @@ async def get_dubbing_options(
 
     return {
         "query": clean_q,
-        "options": options[:15]
+        "options": options[:20]
     }
 
 @app.head("/api/stream/browser")

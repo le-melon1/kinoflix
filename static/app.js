@@ -20,6 +20,14 @@ const state = {
   audioSyncOffset: 0,
   availableDubbings: [],
   activeMovieTitle: '',
+  streamHealth: {
+    lowSpeedTicks: 0,
+    freezeTicks: 0,
+    stallEvents: 0,
+    lastCurrentTime: -1,
+    isWarning: false,
+    streamStartTime: 0
+  },
   preloadedTorrentItem: null,
   preloadedStreamData: null,
   mediaDuration: 0,
@@ -122,6 +130,10 @@ const playerProgressBuffered = document.getElementById('playerProgressBuffered')
 const playerScrubberHandle = document.getElementById('playerScrubberHandle');
 const playerHoverTime = document.getElementById('playerHoverTime');
 const playerHealthText = document.getElementById('playerHealthText');
+const playerHealthPill = document.getElementById('playerHealthPill');
+const playerHealthDot = document.getElementById('playerHealthDot');
+const playerReleaseDrawer = document.getElementById('playerReleaseDrawer');
+const playerReleasesList = document.getElementById('playerReleasesList');
 const playerNextEpBtn = document.getElementById('playerNextEpBtn');
 const playerEpisodesMenuBtn = document.getElementById('playerEpisodesMenuBtn');
 const playerEpisodesDrawer = document.getElementById('playerEpisodesDrawer');
@@ -1583,6 +1595,23 @@ async function startNetflixStream(item, episodeFileId = null, initialSeekTime = 
   playerSpinner.style.display = 'flex';
   spinnerText.textContent = initialSeekTime > 0 ? 'Переключение озвучки...' : 'Подключение к раздаче в обход VPN...';
 
+  // Reset stream health state and health pill styles
+  state.streamHealth = {
+    lowSpeedTicks: 0,
+    freezeTicks: 0,
+    stallEvents: 0,
+    lastCurrentTime: -1,
+    isWarning: false,
+    streamStartTime: Date.now()
+  };
+  if (playerHealthPill) {
+    playerHealthPill.classList.remove('warning-state');
+    playerHealthPill.onclick = null;
+    playerHealthPill.title = '';
+  }
+  if (playerHealthDot) playerHealthDot.className = 'pulse-dot';
+  if (playerReleaseDrawer) playerReleaseDrawer.style.display = 'none';
+
   // Extract clean movie/show title for dubbing switcher
   const cleanTitle = getCleanMovieTitle(item);
   if (cleanTitle) {
@@ -1683,8 +1712,14 @@ async function startNetflixStream(item, episodeFileId = null, initialSeekTime = 
     netflixVideo.volume = parseFloat(playerVolumeSlider ? playerVolumeSlider.value : 1.0);
     updateVolumeIcons();
     netflixVideo.load();
-    if (initialSeekTime > 0 && state.audioMode === 'direct') {
-      netflixVideo.currentTime = initialSeekTime;
+    if (initialSeekTime > 0) {
+      if (state.audioMode === 'direct') {
+        try { netflixVideo.currentTime = initialSeekTime; } catch (_) {}
+      }
+      const seekOnce = () => {
+        try { netflixVideo.currentTime = initialSeekTime; } catch (_) {}
+      };
+      netflixVideo.addEventListener('loadedmetadata', seekOnce, { once: true });
     }
     netflixVideo.play().catch(e => console.log('Autoplay deferred:', e));
 
@@ -1961,9 +1996,11 @@ async function loadDubbingOptions(title, currentHash) {
 }
 
 function renderDubbingOptions(options) {
+  state.availableDubbings = options || [];
+  renderPlayerReleasesList(state.availableDubbings);
+
   const container = document.getElementById('dubbingOptionsList');
   if (!container) return;
-  state.availableDubbings = options || [];
 
   if (!options || options.length === 0) {
     container.innerHTML = '<div style="padding: 8px 12px; color: #888; font-size: 0.8rem;">Других озвучек не найдено</div>';
@@ -1992,6 +2029,66 @@ function renderDubbingOptions(options) {
   }).join('');
 }
 
+function openReleaseSwitcher(e) {
+  if (e) {
+    e.stopPropagation();
+    e.preventDefault();
+  }
+  togglePlayerReleaseDrawer();
+}
+
+function togglePlayerReleaseDrawer() {
+  if (!playerReleaseDrawer) return;
+  const isHidden = playerReleaseDrawer.style.display === 'none';
+  playerReleaseDrawer.style.display = isHidden ? 'flex' : 'none';
+  if (playerAudioMenu) playerAudioMenu.style.display = 'none';
+  if (playerSpeedMenu) playerSpeedMenu.style.display = 'none';
+  if (playerEpisodesDrawer) playerEpisodesDrawer.style.display = 'none';
+
+  if (isHidden) {
+    const title = getCleanMovieTitle(state.activeTorrentItem);
+    loadDubbingOptions(title, state.activeTorrentHash);
+    renderPlayerReleasesList(state.availableDubbings || []);
+  }
+}
+
+function closePlayerReleaseDrawer() {
+  if (playerReleaseDrawer) playerReleaseDrawer.style.display = 'none';
+}
+
+function renderPlayerReleasesList(options) {
+  if (!playerReleasesList) return;
+  if (!options || !options.length) {
+    playerReleasesList.innerHTML = '<div style="padding: 24px; text-align: center; color: #888;"><div class="netflix-spinner-circle" style="width:16px; height:16px; border-width:2px; display:inline-block; margin-right:6px; vertical-align:middle;"></div> Поиск доступных раздач...</div>';
+    return;
+  }
+
+  const curHash = (state.activeTorrentHash || '').toLowerCase();
+
+  playerReleasesList.innerHTML = options.map((opt, idx) => {
+    const isActive = opt.is_active || (opt.hash && curHash && opt.hash.toLowerCase() === curHash);
+    return `
+      <div class="edition-item-card" style="padding: 12px; cursor: pointer; border-radius: 6px; background: ${isActive ? 'rgba(70,211,105,0.08)' : 'rgba(255,255,255,0.05)'}; border: 1px solid ${isActive ? 'rgba(70,211,105,0.4)' : 'rgba(255,255,255,0.1)'}; display: flex; justify-content: space-between; align-items: center; gap: 10px;" onclick="switchDubbingRelease(${idx})">
+        <div style="overflow: hidden; flex: 1;">
+          <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px; flex-wrap: wrap;">
+            <span style="font-weight: 700; color: ${isActive ? '#46d369' : '#fff'}; font-size: 0.9rem;">${escapeHtml(opt.display_name || opt.studio)}</span>
+            ${isActive ? '<span style="color: #46d369; font-size: 0.72rem; font-weight: 800; background: rgba(70,211,105,0.15); padding: 2px 6px; border-radius: 3px;">✓ Играет сейчас</span>' : ''}
+          </div>
+          <div style="display: flex; gap: 8px; font-size: 0.78rem; color: #aaa; align-items: center; flex-wrap: wrap;">
+            <span style="color: #46d369; font-weight: 700;">⚡ ${opt.seeds} сидов</span>
+            <span>•</span>
+            <span>${opt.quality || 'HD'}</span>
+            ${opt.size ? `<span>•</span><span>💾 ${opt.size}</span>` : ''}
+          </div>
+        </div>
+        <button class="n-btn" style="background: ${isActive ? '#333' : '#e50914'}; color: #fff; padding: 6px 14px; border-radius: 4px; font-weight: 700; font-size: 0.8rem; flex-shrink: 0; cursor: pointer;">
+          ${isActive ? 'Активна' : 'Смотреть ▶'}
+        </button>
+      </div>
+    `;
+  }).join('');
+}
+
 function switchDubbingRelease(idx) {
   const opt = state.availableDubbings[idx];
   if (!opt) return;
@@ -1999,14 +2096,16 @@ function switchDubbingRelease(idx) {
   const curHash = (state.activeTorrentHash || '').toLowerCase();
   if (opt.hash && opt.hash.toLowerCase() === curHash) {
     if (playerAudioMenu) playerAudioMenu.style.display = 'none';
+    if (playerReleaseDrawer) playerReleaseDrawer.style.display = 'none';
     return;
   }
 
   const curTime = Math.floor(getEffectiveCurrentTime());
   if (playerAudioMenu) playerAudioMenu.style.display = 'none';
+  if (playerReleaseDrawer) playerReleaseDrawer.style.display = 'none';
 
   playerSpinner.style.display = 'flex';
-  spinnerText.textContent = `Переключение на озвучку «${opt.studio}»...`;
+  spinnerText.textContent = `Переключение на раздачу «${opt.studio || opt.display_name}»...`;
 
   const curEp = (state.videoFiles && state.videoFiles.length > 1) ? state.videoFiles.find(f => f.id === state.activeFileIndex) : null;
 
@@ -2060,8 +2159,16 @@ async function exitNetflixPlayer() {
   netflixVideo.removeAttribute('src');
   netflixVideo.load();
   if (playerEpisodesDrawer) playerEpisodesDrawer.style.display = 'none';
+  if (playerReleaseDrawer) playerReleaseDrawer.style.display = 'none';
   if (playerAudioMenu) playerAudioMenu.style.display = 'none';
   if (playerSpeedMenu) playerSpeedMenu.style.display = 'none';
+
+  if (playerHealthPill) {
+    playerHealthPill.classList.remove('warning-state');
+    playerHealthPill.onclick = null;
+    playerHealthPill.title = '';
+  }
+  if (playerHealthDot) playerHealthDot.className = 'pulse-dot';
 
   if (document.fullscreenElement) {
     document.exitFullscreen().catch(() => {});
@@ -2087,10 +2194,21 @@ function setupPlayerEventListeners() {
   netflixVideo.addEventListener('timeupdate', updateProgress);
   netflixVideo.addEventListener('waiting', () => {
     playerSpinner.style.display = 'flex';
+    if (state.streamHealth) {
+      state.streamHealth.stallEvents++;
+    }
+  });
+  netflixVideo.addEventListener('stalled', () => {
+    if (state.streamHealth) {
+      state.streamHealth.stallEvents++;
+    }
   });
   netflixVideo.addEventListener('playing', () => {
     playerSpinner.style.display = 'none';
     updatePlayPauseIcons();
+    if (state.streamHealth) {
+      state.streamHealth.freezeTicks = 0;
+    }
   });
   netflixVideo.addEventListener('pause', updatePlayPauseIcons);
   netflixVideo.addEventListener('progress', updateBufferedRange);
@@ -2120,6 +2238,9 @@ function setupPlayerEventListeners() {
     }
     if (!e.target.closest('#playerSpeedBtn') && !e.target.closest('#playerSpeedMenu')) {
       if (playerSpeedMenu) playerSpeedMenu.style.display = 'none';
+    }
+    if (!e.target.closest('#playerReleaseDrawer') && !e.target.closest('#playerHealthPill') && !e.target.closest('.n-pill-switch-btn')) {
+      if (playerReleaseDrawer) playerReleaseDrawer.style.display = 'none';
     }
   });
 
@@ -2321,10 +2442,88 @@ function startStatsPolling() {
       const res = await fetch(`/api/stream/stats?hash=${state.activeTorrentHash}`);
       const stats = await res.json();
       if (stats.active) {
-        playerHealthText.textContent = `⚡ В обход VPN (en0) • ${stats.download_speed_mb} МБ/с • ${stats.active_peers} пиров • Буфер: ${stats.buffer_percent}%`;
-        if (stats.buffer_percent > 0 && stats.buffer_percent < 100) {
-          spinnerText.textContent = `Буферизация: ${stats.buffer_percent}% (${stats.download_speed_mb} МБ/с)...`;
+        const speed = stats.download_speed_mb || 0;
+        const peers = stats.active_peers || 0;
+        const elapsed = (Date.now() - (state.streamHealth?.streamStartTime || Date.now())) / 1000;
+
+        // Health evaluation
+        if (state.streamHealth) {
+          // Low speed check
+          const isLowSpeed = (speed < 0.25 && peers <= 4) || (speed < 0.10);
+          if (elapsed > 4.0 && isLowSpeed) {
+            state.streamHealth.lowSpeedTicks++;
+          } else if (speed >= 0.5) {
+            state.streamHealth.lowSpeedTicks = Math.max(0, state.streamHealth.lowSpeedTicks - 1);
+          }
+
+          // Freezing check: video unpaused, but currentTime not moving forward
+          if (!netflixVideo.paused && !netflixVideo.ended && elapsed > 4.0) {
+            const cur = netflixVideo.currentTime;
+            if (cur > 0 && Math.abs(cur - state.streamHealth.lastCurrentTime) < 0.15) {
+              state.streamHealth.freezeTicks++;
+            } else {
+              state.streamHealth.freezeTicks = Math.max(0, state.streamHealth.freezeTicks - 1);
+            }
+            state.streamHealth.lastCurrentTime = cur;
+          }
+
+          // Trigger recommendation if persistent low speed or freezing occurs
+          const shouldWarn = elapsed > 4.0 && (
+            state.streamHealth.lowSpeedTicks >= 3 ||
+            state.streamHealth.freezeTicks >= 2 ||
+            state.streamHealth.stallEvents >= 2
+          );
+
+          if (shouldWarn) {
+            state.streamHealth.isWarning = true;
+            if (playerHealthPill) {
+              playerHealthPill.classList.add('warning-state');
+              playerHealthPill.onclick = (e) => { openReleaseSwitcher(e); };
+              playerHealthPill.title = 'Нажмите для быстрого перехода на другую раздачу';
+            }
+            if (playerHealthDot) {
+              playerHealthDot.className = 'pulse-dot pulse-dot-warning';
+            }
+
+            let reasonMsg = `⚠️ Низкая скорость (${speed} МБ/с) • Рекомендуется сменить раздачу`;
+            if (state.streamHealth.freezeTicks >= 2) {
+              reasonMsg = '⚠️ Зависание видео • Рекомендуется сменить раздачу';
+            } else if (peers <= 2) {
+              reasonMsg = `⚠️ Мало сидов (${peers} пир.) • Рекомендуется сменить раздачу`;
+            }
+
+            playerHealthText.innerHTML = `${reasonMsg} <button class="n-pill-switch-btn" onclick="openReleaseSwitcher(event)" title="Открыть список доступных раздач">Сменить раздачу ↻</button>`;
+
+            // If buffering spinner is currently up, provide recommendation button there too
+            if (playerSpinner && playerSpinner.style.display !== 'none' && stats.buffer_percent < 100) {
+              spinnerText.innerHTML = `Буферизация: ${stats.buffer_percent}% (${speed} МБ/с)<br><span style="font-size:0.85rem; color:#ffa801;">Скорость раздачи низкая. Рекомендуем переключиться:</span><br><button class="n-pill-switch-btn" style="margin-top:8px; padding:6px 14px; font-size:0.82rem;" onclick="openReleaseSwitcher(event)">Выбрать быструю раздачу ↻</button>`;
+            }
+          } else {
+            // Restore normal state if speed recovers
+            if (state.streamHealth.isWarning && speed >= 0.5 && state.streamHealth.freezeTicks === 0) {
+              state.streamHealth.isWarning = false;
+              if (playerHealthPill) {
+                playerHealthPill.classList.remove('warning-state');
+                playerHealthPill.onclick = null;
+                playerHealthPill.title = '';
+              }
+              if (playerHealthDot) {
+                playerHealthDot.className = 'pulse-dot';
+              }
+            }
+
+            if (!state.streamHealth.isWarning) {
+              playerHealthText.textContent = `⚡ В обход VPN (en0) • ${stats.download_speed_mb} МБ/с • ${stats.active_peers} пиров • Буфер: ${stats.buffer_percent}%`;
+            }
+
+            if (stats.buffer_percent > 0 && stats.buffer_percent < 100) {
+              spinnerText.textContent = `Буферизация: ${stats.buffer_percent}% (${stats.download_speed_mb} МБ/с)...`;
+            }
+          }
+        } else {
+          playerHealthText.textContent = `⚡ В обход VPN (en0) • ${stats.download_speed_mb} МБ/с • ${stats.active_peers} пиров • Буфер: ${stats.buffer_percent}%`;
         }
+
         if (stats.is_ready) {
           playerSpinner.style.display = 'none';
         }
@@ -2452,6 +2651,16 @@ function setupKeyboardShortcuts() {
           updateVolumeIcons();
           break;
         case 'escape':
+          if (playerReleaseDrawer && playerReleaseDrawer.style.display !== 'none') {
+            e.preventDefault();
+            closePlayerReleaseDrawer();
+            break;
+          }
+          if (playerEpisodesDrawer && playerEpisodesDrawer.style.display !== 'none') {
+            e.preventDefault();
+            playerEpisodesDrawer.style.display = 'none';
+            break;
+          }
           e.preventDefault();
           if (document.fullscreenElement) {
             document.exitFullscreen().catch(() => {});

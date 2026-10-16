@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="referrer" content="no-referrer">
   <title>Netflix — Смотрите фильмы и сериалы онлайн</title>
-  <link rel="stylesheet" href="style.css?v=2.6">
+  <link rel="stylesheet" href="style.css?v=2.7">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -444,10 +444,10 @@
             </div>
           </div>
 
-          <!-- Center Status Badge -->
+          <!-- Center Status Badge / Stream Health -->
           <div class="n-controls-center">
-            <div class="n-stream-health-pill">
-              <span class="pulse-dot"></span>
+            <div class="n-stream-health-pill" id="playerHealthPill">
+              <span class="pulse-dot" id="playerHealthDot"></span>
               <span id="playerHealthText">⚡ В обход VPN (en0) • 0.0 МБ/с • Буфер 0%</span>
             </div>
           </div>
@@ -552,6 +552,22 @@
           <button class="drawer-close" onclick="togglePlayerEpisodesMenu()" title="Закрыть">✕</button>
         </div>
         <div class="drawer-items-list" id="playerEpisodesList"></div>
+      </div>
+
+      <!-- Player Fast Release Switcher Drawer -->
+      <div class="n-player-episodes-drawer" id="playerReleaseDrawer" style="display: none; width: 440px; max-width: 92vw;">
+        <div class="drawer-header">
+          <div class="drawer-title-row">
+            <h3 style="display: flex; align-items: center; gap: 8px;">
+              <span>⚡ Смена раздачи</span>
+            </h3>
+            <div style="font-size: 0.78rem; color: #aaa;">Выберите раздачу с высокой скоростью</div>
+          </div>
+          <button class="drawer-close" onclick="closePlayerReleaseDrawer()" title="Закрыть (Esc)">✕</button>
+        </div>
+        <div class="drawer-items-list" id="playerReleasesList" style="padding: 12px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto;">
+          <div style="padding: 20px; text-align: center; color: #888;">Загрузка доступных раздач...</div>
+        </div>
       </div>
 
     </div>
@@ -706,6 +722,6 @@
   <!-- Toast Notification Container -->
   <div id="toastContainer" style="position: fixed; top: 24px; right: 24px; z-index: 999999; display: flex; flex-direction: column; gap: 10px; pointer-events: none;"></div>
 
-  <script src="app.js?v=2.6"></script>
+  <script src="app.js?v=2.7"></script>
 </body>
 </html>
