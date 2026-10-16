@@ -2,9 +2,20 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="referrer" content="no-referrer">
   <title>KinoFlix — Смотрите фильмы и сериалы онлайн</title>
+
+  <!-- PWA & Mobile Web App Capabilities -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#E50914">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="KinoFlix">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png">
   <link rel="stylesheet" href="style.css?v=3.2">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -66,6 +77,11 @@
         <span class="status-dot dot-gray" id="rtDot"></span>
         <span id="rtText">RuTracker</span>
       </div>
+
+      <!-- App Install Button (PWA / Mobile / Desktop) -->
+      <button class="nav-pill" id="installAppBtn" onclick="openInstallModal()" title="Установить приложение на телефон, Windows или Mac" style="padding: 6px 12px; cursor: pointer; border: 1px solid rgba(229,9,20,0.6); background: rgba(229,9,20,0.25); color: #fff; border-radius: 20px; font-weight: 700; display: flex; align-items: center; gap: 5px;">
+        📱 <span>Приложение</span>
+      </button>
 
       <!-- Settings Button -->
       <button class="nav-pill" onclick="openSettingsModal()" title="Настройки системы, сети и режимов" style="padding: 6px 12px; cursor: pointer; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.5); color: #fff; border-radius: 20px;">
@@ -1024,6 +1040,141 @@
       </div>
     </div>
   </div>
+
+  <!-- INSTALL APP MODAL (ТЕЛЕФОН, WINDOWS, MAC) -->
+  <div class="netflix-modal-backdrop" id="installModal" style="display: none;" onclick="closeInstallModalOnBackdrop(event)">
+    <div class="netflix-modal-card" style="max-width: 640px; padding: 26px; border-radius: 14px; background: #161616; border: 1px solid rgba(255,255,255,0.18);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h2 style="color: #fff; font-size: 1.35rem; font-weight: 800; display: flex; align-items: center; gap: 10px;">
+          <span>📱</span> Установка приложения KinoFlix
+        </h2>
+        <button class="modal-close-circle" onclick="closeInstallModal()" style="position: static;">✕</button>
+      </div>
+
+      <!-- App Highlights -->
+      <div style="display: flex; gap: 14px; align-items: center; background: rgba(229,9,20,0.12); border: 1px solid rgba(229,9,20,0.3); border-radius: 10px; padding: 14px; margin-bottom: 20px;">
+        <img src="/icons/icon-192.png" alt="KinoFlix" style="width: 54px; height: 54px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
+        <div>
+          <div style="color: #fff; font-weight: 700; font-size: 1.05rem;">KinoFlix для всех ваших устройств</div>
+          <div style="color: #bbb; font-size: 0.84rem; margin-top: 3px;">Полноэкранный режим без рамок браузера, плавные жесты, быстрый запуск с рабочего стола и сохранение прогресса.</div>
+        </div>
+      </div>
+
+      <!-- Platform Tabs -->
+      <div style="display: flex; gap: 8px; margin-bottom: 18px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 12px; flex-wrap: wrap;">
+        <button class="cf-pill active" id="tabBtnPhone" onclick="switchInstallTab('phone')">📱 Телефон (iPhone / Android)</button>
+        <button class="cf-pill" id="tabBtnMac" onclick="switchInstallTab('mac')"> Mac (macOS)</button>
+        <button class="cf-pill" id="tabBtnWindows" onclick="switchInstallTab('windows')">🪟 Windows (10 / 11)</button>
+      </div>
+
+      <!-- TAB 1: PHONE -->
+      <div id="installTabPhone" class="install-tab-pane">
+        <!-- Direct PWA Install Button (Android / Chrome) -->
+        <div id="pwaInstallPromptBox" style="margin-bottom: 16px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 14px; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div style="color: #fff; font-weight: 700;">Быстрая установка в 1 клик</div>
+            <div style="color: #888; font-size: 0.82rem;">Для Android, Chrome и Яндекс.Браузера</div>
+          </div>
+          <button class="netflix-red-btn" id="btnTriggerPwaInstall" onclick="triggerPwaInstall()" style="padding: 9px 18px; font-size: 0.88rem;">
+            Установить
+          </button>
+        </div>
+
+        <!-- iOS Instructions -->
+        <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 16px;">
+          <h4 style="color: #fff; font-size: 0.95rem; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+            🍏 Как установить на iPhone / iPad:
+          </h4>
+          <ol style="color: #ccc; font-size: 0.88rem; line-height: 1.6; margin-left: 20px; padding-left: 0;">
+            <li>Откройте сайт в <strong>Safari</strong></li>
+            <li>Нажмите кнопку <strong>«Поделиться»</strong> (иконка квадрата со стрелкой вверх <span style="background:rgba(255,255,255,0.15); padding:2px 6px; border-radius:4px;">⎋</span> внизу экрана)</li>
+            <li>Прокрутите список вниз и выберите <strong>«На экран "Домой"»</strong> (или <em>Add to Home Screen</em>)</li>
+            <li>Нажмите <strong>«Добавить»</strong> в правом верхнем углу</li>
+          </ol>
+          <div style="margin-top: 10px; color: #46d369; font-size: 0.82rem; font-weight: 600;">
+            ✔ Приложение откроется во весь экран без адресной строки Safari!
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 2: MAC -->
+      <div id="installTabMac" class="install-tab-pane" style="display: none;">
+        <div style="display: flex; flex-direction: column; gap: 14px;">
+          <div style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 14px; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <div style="color: #fff; font-weight: 700; font-size: 0.95rem;"> PWA-приложение для macOS</div>
+              <div style="color: #888; font-size: 0.8rem; margin-top: 2px;">Запуск из Dock, собственное отдельное окно без вкладок</div>
+            </div>
+            <button class="netflix-red-btn" onclick="triggerPwaInstall()" style="padding: 8px 16px; font-size: 0.85rem;">
+              Установить в Dock
+            </button>
+          </div>
+
+          <div style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 14px;">
+            <div style="color: #fff; font-weight: 700; font-size: 0.95rem; margin-bottom: 4px;">🚀 Нативное приложение KinoFlix.app</div>
+            <div style="color: #888; font-size: 0.82rem; line-height: 1.5; margin-bottom: 12px;">
+              Полноценное настольное приложение на базе WebKit с автозапуском движка TorrServer в фоне. Для сборки выполните команду в терминале:
+            </div>
+            <div style="background: #000; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 8px 12px; font-family: monospace; font-size: 0.82rem; color: #46d369; display: flex; justify-content: space-between; align-items: center;">
+              <code>./build_macos.sh</code>
+              <button class="n-secondary-btn" onclick="navigator.clipboard.writeText('./build_macos.sh'); showToast('Скопировано!', 'success');" style="padding: 3px 8px; font-size: 0.75rem; background: rgba(255,255,255,0.15); color: #fff; border: none; border-radius: 3px; cursor: pointer;">Копировать</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 3: WINDOWS -->
+      <div id="installTabWindows" class="install-tab-pane" style="display: none;">
+        <div style="display: flex; flex-direction: column; gap: 14px;">
+          <div style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 14px; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <div style="color: #fff; font-weight: 700; font-size: 0.95rem;">🪟 Приложение для Windows (Edge / Chrome)</div>
+              <div style="color: #888; font-size: 0.8rem; margin-top: 2px;">Закрепление в меню «Пуск» и на панели задач, отдельное окно</div>
+            </div>
+            <button class="netflix-red-btn" onclick="triggerPwaInstall()" style="padding: 8px 16px; font-size: 0.85rem;">
+              Установить
+            </button>
+          </div>
+
+          <div style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 14px;">
+            <div style="color: #fff; font-weight: 700; font-size: 0.95rem; margin-bottom: 4px;">📦 Нативный исполняемый файл KinoFlix.exe</div>
+            <div style="color: #888; font-size: 0.82rem; line-height: 1.5; margin-bottom: 12px;">
+              Автономный exe-файл со встроенным интерфейсом и движком воспроизведения. Скрипт быстрой сборки:
+            </div>
+            <div style="background: #000; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 8px 12px; font-family: monospace; font-size: 0.82rem; color: #46d369; display: flex; justify-content: space-between; align-items: center;">
+              <code>build_windows.bat</code>
+              <button class="n-secondary-btn" onclick="navigator.clipboard.writeText('build_windows.bat'); showToast('Скопировано!', 'success');" style="padding: 3px 8px; font-size: 0.75rem; background: rgba(255,255,255,0.15); color: #fff; border: none; border-radius: 3px; cursor: pointer;">Копировать</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- MOBILE BOTTOM NAVIGATION (FOR PHONES) -->
+  <nav class="mobile-bottom-nav" id="mobileBottomNav">
+    <button class="mb-nav-btn active" id="mbNavHome" onclick="switchCategory('all')">
+      <span class="mb-icon">🏠</span>
+      <span class="mb-label">Главная</span>
+    </button>
+    <button class="mb-nav-btn" id="mbNavMovies" onclick="switchCategory('movies')">
+      <span class="mb-icon">🎬</span>
+      <span class="mb-label">Фильмы</span>
+    </button>
+    <button class="mb-nav-btn" id="mbNavSeries" onclick="switchCategory('series')">
+      <span class="mb-icon">📺</span>
+      <span class="mb-label">Сериалы</span>
+    </button>
+    <button class="mb-nav-btn" id="mbNavFavorites" onclick="switchCategory('favorites')">
+      <span class="mb-icon">⭐</span>
+      <span class="mb-label">Мой список</span>
+    </button>
+    <button class="mb-nav-btn" id="mbNavDownloads" onclick="openDownloadsView()">
+      <span class="mb-icon">💾</span>
+      <span class="mb-label">Загрузки</span>
+    </button>
+  </nav>
 
   <!-- Toast Notification Container -->
   <div id="toastContainer" style="position: fixed; top: 24px; right: 24px; z-index: 999999; display: flex; flex-direction: column; gap: 10px; pointer-events: none;"></div>

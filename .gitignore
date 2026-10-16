@@ -7,3 +7,6 @@ test_out.mp4
 config.db
 settings.json
 .DS_Store
+build/
+dist/
+static/icons/icon.iconset/

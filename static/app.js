@@ -329,6 +329,10 @@ function openFavoritesView() {
   const favNav = document.getElementById('navFavorites');
   if (favNav) favNav.classList.add('active');
 
+  document.querySelectorAll('.mb-nav-btn').forEach(b => b.classList.remove('active'));
+  const favMb = document.getElementById('mbNavFavorites');
+  if (favMb) favMb.classList.add('active');
+
   homeView.style.display = 'none';
   searchResultsView.style.display = 'none';
   if (tvView) tvView.style.display = 'none';
@@ -637,6 +641,84 @@ function getEffectiveCurrentTime() {
     return vidCur;
   }
   return (state.currentSeekOffset || 0) + vidCur;
+}
+
+// --- PWA & SERVICE WORKER REGISTRATION ---
+let _deferredInstallPrompt = null;
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').then((reg) => {
+      console.log('PWA ServiceWorker registered:', reg.scope);
+    }).catch((err) => {
+      console.log('PWA ServiceWorker registration error:', err);
+    });
+  });
+}
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  _deferredInstallPrompt = e;
+  const btn = document.getElementById('installAppBtn');
+  if (btn) btn.style.display = 'flex';
+  const pwaBox = document.getElementById('pwaInstallPromptBox');
+  if (pwaBox) pwaBox.style.display = 'flex';
+});
+
+window.addEventListener('appinstalled', () => {
+  _deferredInstallPrompt = null;
+  const btn = document.getElementById('installAppBtn');
+  if (btn) btn.style.display = 'none';
+  showToast('KinoFlix успешно установлено!', 'success');
+});
+
+function openInstallModal() {
+  const modal = document.getElementById('installModal');
+  if (modal) modal.style.display = 'flex';
+}
+
+function closeInstallModal() {
+  const modal = document.getElementById('installModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function closeInstallModalOnBackdrop(e) {
+  if (e.target.id === 'installModal') closeInstallModal();
+}
+
+function switchInstallTab(platform) {
+  document.querySelectorAll('.install-tab-pane').forEach(p => p.style.display = 'none');
+  const phoneBtn = document.getElementById('tabBtnPhone');
+  const macBtn = document.getElementById('tabBtnMac');
+  const winBtn = document.getElementById('tabBtnWindows');
+  if (phoneBtn) phoneBtn.classList.toggle('active', platform === 'phone');
+  if (macBtn) macBtn.classList.toggle('active', platform === 'mac');
+  if (winBtn) winBtn.classList.toggle('active', platform === 'windows');
+
+  if (platform === 'phone') {
+    const pane = document.getElementById('installTabPhone');
+    if (pane) pane.style.display = 'block';
+  } else if (platform === 'mac') {
+    const pane = document.getElementById('installTabMac');
+    if (pane) pane.style.display = 'block';
+  } else if (platform === 'windows') {
+    const pane = document.getElementById('installTabWindows');
+    if (pane) pane.style.display = 'block';
+  }
+}
+
+async function triggerPwaInstall() {
+  if (_deferredInstallPrompt) {
+    _deferredInstallPrompt.prompt();
+    const { outcome } = await _deferredInstallPrompt.userChoice;
+    if (outcome === 'accepted') {
+      showToast('Установка KinoFlix начата!', 'success');
+      closeInstallModal();
+    }
+    _deferredInstallPrompt = null;
+  } else {
+    showToast('Нажмите значок ⊕ или 📲 в строке адреса браузера для установки', 'info');
+  }
 }
 
 // --- INIT ---
@@ -1090,6 +1172,10 @@ async function openDownloadsView() {
   const dlNav = document.getElementById('navDownloads');
   if (dlNav) dlNav.classList.add('active');
 
+  document.querySelectorAll('.mb-nav-btn').forEach(b => b.classList.remove('active'));
+  const dlMb = document.getElementById('mbNavDownloads');
+  if (dlMb) dlMb.classList.add('active');
+
   homeView.style.display = 'none';
   searchResultsView.style.display = 'none';
   if (tvView) tvView.style.display = 'none';
@@ -1473,6 +1559,11 @@ function switchCategory(cat) {
   if (cat === 'series' && links[1]) links[1].classList.add('active');
   if (cat === 'movies' && links[2]) links[2].classList.add('active');
   if ((cat === 'trending' || cat === 'new_releases') && links[3]) links[3].classList.add('active');
+
+  document.querySelectorAll('.mb-nav-btn').forEach(b => b.classList.remove('active'));
+  if (cat === 'all') { const b = document.getElementById('mbNavHome'); if (b) b.classList.add('active'); }
+  if (cat === 'movies') { const b = document.getElementById('mbNavMovies'); if (b) b.classList.add('active'); }
+  if (cat === 'series') { const b = document.getElementById('mbNavSeries'); if (b) b.classList.add('active'); }
 
   goHome();
 
