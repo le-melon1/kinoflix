@@ -20,6 +20,8 @@ const state = {
   audioSyncOffset: 0,
   availableDubbings: [],
   activeMovieTitle: '',
+  preloadedTorrentItem: null,
+  preloadedStreamData: null,
   mediaDuration: 0,
   currentSeekOffset: 0,
   nextEpCountdownTimer: null,
@@ -931,6 +933,8 @@ async function openMovieDetails(movie) {
     const isSeries = state.activeMovie.is_series || (top && (top.title.toLowerCase().includes('сезон') || top.title.toLowerCase().includes('сери') || top.title.toLowerCase().includes('s0')));
     if (isSeries && top) {
       loadEpisodesForModal(top, state.activeMovie);
+    } else if (top) {
+      preloadStream(top);
     }
   } catch (err) {
     modalEditionsList.innerHTML = `<div style="color:#888;">Ошибка загрузки раздач: ${err.message}</div>`;
@@ -960,6 +964,8 @@ function openMovieDetailsWithTorrents(movie, verified, allResults) {
   const isSeries = movie.is_series || (top && (top.title.toLowerCase().includes('сезон') || top.title.toLowerCase().includes('сери') || top.title.toLowerCase().includes('s0')));
   if (isSeries && top) {
     loadEpisodesForModal(top, movie);
+  } else if (top) {
+    preloadStream(top);
   }
 }
 
@@ -988,6 +994,8 @@ async function loadEpisodesForModal(item, movie, preferredSeason = null) {
     const data = await res.json();
     state.modalTorrentItem = item;
     state.modalTorrentData = data;
+    state.preloadedTorrentItem = item;
+    state.preloadedStreamData = data;
     state.modalSeasons = data.seasons || {};
     state.modalVideoFiles = data.video_files || [];
 
@@ -1295,6 +1303,32 @@ function getStreamUrlForFile(hash, fileId) {
   }
 }
 
+async function preloadStream(item, fileId = null) {
+  if (!item) return;
+  state.preloadedTorrentItem = item;
+  const payload = {
+    title: item.title,
+    magnet: item.magnet,
+    topic_id: item.topic_id,
+    link: item.magnet || (item.topic_id ? `https://rutracker.net/forum/viewtopic.php?t=${item.topic_id}` : null),
+    index: fileId
+  };
+
+  try {
+    const res = await fetch('/api/stream/preload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      state.preloadedStreamData = data;
+    }
+  } catch (e) {
+    console.log('Preload background notice:', e);
+  }
+}
+
 async function startNetflixStream(item, episodeFileId = null, initialSeekTime = 0) {
   closeDetailModal();
   cancelNextEpisodeCountdown();
@@ -1316,32 +1350,46 @@ async function startNetflixStream(item, episodeFileId = null, initialSeekTime = 
   }
 
   try {
-    const payload = {
-      title: item.title,
-      magnet: item.magnet,
-      topic_id: item.topic_id,
-      link: item.magnet || (item.topic_id ? `https://rutracker.net/forum/viewtopic.php?t=${item.topic_id}` : null)
-    };
+    let data = null;
+    const isPreloaded = state.preloadedStreamData &&
+      (state.preloadedStreamData.hash === item.hash ||
+       (state.preloadedTorrentItem && (
+         (item.magnet && state.preloadedTorrentItem.magnet === item.magnet) ||
+         (item.id && state.preloadedTorrentItem.id === item.id) ||
+         (item.title && state.preloadedTorrentItem.title === item.title)
+       )));
 
-    const res = await fetch('/api/stream/prepare', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    if (isPreloaded) {
+      data = state.preloadedStreamData;
+    } else {
+      const payload = {
+        title: item.title,
+        magnet: item.magnet,
+        topic_id: item.topic_id,
+        link: item.magnet || (item.topic_id ? `https://rutracker.net/forum/viewtopic.php?t=${item.topic_id}` : null)
+      };
 
-    if (!res.ok) {
-      let errMsg = 'Не удалось подготовить поток';
-      try {
-        const err = await res.json();
-        errMsg = err.detail || err.error || errMsg;
-      } catch (_) {
-        const txt = await res.text();
-        if (txt) errMsg = txt;
+      const res = await fetch('/api/stream/prepare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        let errMsg = 'Не удалось подготовить поток';
+        try {
+          const err = await res.json();
+          errMsg = err.detail || err.error || errMsg;
+        } catch (_) {
+          const txt = await res.text();
+          if (txt) errMsg = txt;
+        }
+        throw new Error(errMsg);
       }
-      throw new Error(errMsg);
+
+      data = await res.json();
     }
 
-    const data = await res.json();
     state.activeTorrentHash = data.hash;
     state.videoFiles = data.video_files || [];
     state.seasons = data.seasons || {};

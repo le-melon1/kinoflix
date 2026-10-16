@@ -444,6 +444,28 @@ class TorrServerManager:
         except Exception:
             return {"active": False}
 
+    async def start_preload_and_probe(self, torrent_hash: str, index: int = 1):
+        """
+        Pre-buffers the first seconds of the video into TorrServer RAM cache
+        and warms up the ffprobe media track probe cache.
+        """
+        if not torrent_hash:
+            return
+        import asyncio
+        try:
+            preload_url = f"{TORRSERVER_URL}/stream/stream.mkv?link={torrent_hash}&index={index}&preload"
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                try:
+                    await client.get(preload_url)
+                except Exception:
+                    pass
+
+            cache_key = f"{torrent_hash}_{index}"
+            if cache_key not in _probe_cache:
+                await asyncio.to_thread(probe_media_tracks, torrent_hash, index)
+        except Exception as e:
+            print(f"Preload notice: {e}")
+
     async def drop_torrent(self, torrent_hash: Optional[str] = None):
         """Immediately drop torrent from memory to release user's internet"""
         h = torrent_hash or self.active_hash

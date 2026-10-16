@@ -4,7 +4,7 @@ import asyncio
 import urllib.parse
 from typing import Optional, List, Dict, Any
 import httpx
-from fastapi import FastAPI, Query, HTTPException, Response, Request
+from fastapi import FastAPI, Query, HTTPException, Response, Request, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel
@@ -34,6 +34,7 @@ class StreamPrepareRequest(BaseModel):
     magnet: Optional[str] = None
     topic_id: Optional[str] = None
     title: Optional[str] = "Movie"
+    index: Optional[int] = None
 
 class StreamStopRequest(BaseModel):
     torrent_hash: Optional[str] = None
@@ -230,7 +231,7 @@ async def search(
 
 
 @app.post("/api/stream/prepare")
-async def prepare_stream(req: StreamPrepareRequest):
+async def prepare_stream(req: StreamPrepareRequest, background_tasks: BackgroundTasks):
     magnet = req.magnet
     # If topic_id is provided, resolve magnet
     if not magnet and req.topic_id:
@@ -250,9 +251,42 @@ async def prepare_stream(req: StreamPrepareRequest):
 
     try:
         info = await torrserver_mgr.add_torrent(magnet, title=req.title or "Movie")
+        target_idx = req.index or info.get("default_index") or 1
+        background_tasks.add_task(torrserver_mgr.start_preload_and_probe, info["hash"], target_idx)
         return info
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка движка стриминга: {str(e)}")
+
+@app.post("/api/stream/preload")
+async def preload_stream(req: StreamPrepareRequest, background_tasks: BackgroundTasks):
+    """
+    Preloads the first seconds of a movie or TV show as soon as user opens its page.
+    Enables instant 0-second latency playback when user clicks Play.
+    """
+    magnet = req.magnet
+    if not magnet and req.topic_id:
+        magnet = await rutracker_client.get_topic_magnet(req.topic_id)
+    
+    if not magnet and req.link:
+        if req.link.startswith("magnet:?"):
+            magnet = req.link
+        else:
+            t_m = re.search(r'viewtopic\.php\?t=(\d+)', req.link)
+            if t_m:
+                magnet = await rutracker_client.get_topic_magnet(t_m.group(1))
+
+    if not magnet:
+        raise HTTPException(status_code=400, detail="Не удалось получить magnet-ссылку для предзагрузки")
+
+    try:
+        info = await torrserver_mgr.add_torrent(magnet, title=req.title or "Movie")
+        target_idx = req.index or info.get("default_index") or 1
+        background_tasks.add_task(torrserver_mgr.start_preload_and_probe, info["hash"], target_idx)
+        info["preloading"] = True
+        info["target_index"] = target_idx
+        return info
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка предзагрузки: {str(e)}")
 
 @app.get("/api/stream/stats")
 async def stream_stats(hash: Optional[str] = None):
