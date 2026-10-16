@@ -312,51 +312,45 @@ async def get_dubbing_options(
     from backend.rutor import search_rutor
     from backend.metadata import extract_season_info
     
-    def extract_studio_label(title: str) -> str:
-        t_low = title.lower()
-        if "red head sound" in t_low or re.search(r'\brhs\b', t_low):
-            return "Red Head Sound (RHS)"
-        if "hdrezka" in t_low or "rezka" in t_low:
-            return "HDRezka Studio"
-        if "lostfilm" in t_low:
-            return "LostFilm"
-        if "кубик в кубе" in t_low or "kubik v kube" in t_low:
-            return "Кубик в Кубе"
-        if "iyuno" in t_low or "невафильм" in t_low or "пифагор" in t_low:
-            return "Официальный дубляж (Netflix / Лицензия)"
-        if "flarrow" in t_low:
-            return "Flarrow Films"
-        if "newstudio" in t_low:
-            return "NewStudio"
-        if "tvshows" in t_low:
-            return "TVShows"
-        if "alexfilm" in t_low:
-            return "AlexFilm"
-        if "jaskier" in t_low:
-            return "Jaskier"
-        if "сыендук" in t_low or "sndk" in t_low:
-            return "Сыендук"
-        if "дублирован" in t_low or "дубляж" in t_low or "лицензия" in t_low:
-            return "Полный дубляж (Лицензия)"
-        if "многоголос" in t_low or " mvo " in t_low:
-            return "Профессиональный (Многоголосый)"
-        if "двухголос" in t_low or " dvo " in t_low:
-            return "Двухголосый закадровый"
-        if "оригинал" in t_low or "english" in t_low or "субтитр" in t_low:
-            return "Оригинал + Субтитры"
-        return "Русская озвучка"
+    clean_q = re.sub(r'\[.*?\]|\(.*?\)|1080p|2160p|4k|bdrip|web-dl', '', query, flags=re.IGNORECASE).strip()
+    if not clean_q:
+        clean_q = query
 
-    results = await search_rutor(query, limit=35, min_seeds=2)
+    KNOWN_STUDIOS = [
+        (r'\b(red head sound|rhs)\b', 'Red Head Sound (RHS)'),
+        (r'\b(hdrezka|rezka)\b', 'HDRezka Studio'),
+        (r'\blostfilm\b', 'LostFilm'),
+        (r'\b(кубик в кубе|kubik v kube)\b', 'Кубик в Кубе'),
+        (r'\bjaskier\b', 'Jaskier'),
+        (r'\btvshows\b', 'TVShows'),
+        (r'\bnewstudio\b', 'NewStudio'),
+        (r'\balexfilm\b', 'AlexFilm'),
+        (r'\bflarrow\b', 'Flarrow Films'),
+        (r'\b(сыендук|sndk)\b', 'Сыендук'),
+        (r'\b(iyuno|невафильм|пифагор)\b', 'Официальный дубляж (Лицензия)'),
+        (r'\b(дубляж|дублирован)\b', 'Полный дубляж (Лицензия)'),
+        (r'\bmvo\b', 'Профессиональный многоголосый (MVO)'),
+        (r'\bdvo\b', 'Двухголосый закадровый (DVO)'),
+    ]
+
+    results = await search_rutor(clean_q, limit=40, min_seeds=1)
     options = []
     seen_studios = set()
 
     for r in results:
-        t_low = r.get("title", "").lower()
+        t = r.get("title", "")
+        t_low = t.lower()
         if any(bad in t_low for bad in ["обои", "wallpaper", "soundtrack", " ost ", "ost]", "книга", "комикс", "mp3", "flac"]):
             continue
-        studio = extract_studio_label(r.get("title", ""))
-        s_label, _, _, _ = extract_season_info(r.get("title", ""))
-        full_key = f"{studio}_{s_label or 'all'}"
+        
+        studios_in_rel = []
+        for pat, lbl in KNOWN_STUDIOS:
+            if re.search(pat, t_low, re.IGNORECASE) and lbl not in studios_in_rel:
+                studios_in_rel.append(lbl)
+        if not studios_in_rel:
+            studios_in_rel = ["Русская озвучка"]
+
+        s_label, _, _, _ = extract_season_info(t)
         magnet = r.get("magnet") or ""
         m_hash = re.search(r'urn:btih:([a-zA-Z0-9]+)', magnet, re.IGNORECASE)
         hash_val = m_hash.group(1).lower() if m_hash else None
@@ -365,29 +359,31 @@ async def get_dubbing_options(
         if current_hash and hash_val and current_hash.lower() == hash_val.lower():
             is_active = True
 
-        if full_key not in seen_studios:
-            seen_studios.add(full_key)
-            options.append({
-                "id": r["id"],
-                "hash": hash_val,
-                "studio": studio,
-                "season_label": s_label,
-                "display_name": f"{studio}{(' • ' + s_label) if s_label else ''}",
-                "title": r["title"],
-                "quality": r.get("quality", "HD"),
-                "seeds": r.get("seeds", 0),
-                "size": r.get("size", ""),
-                "magnet": magnet,
-                "source": r.get("source", "Rutor"),
-                "is_active": is_active
-            })
+        for studio in studios_in_rel:
+            full_key = f"{studio}_{s_label or 'all'}"
+            if full_key not in seen_studios:
+                seen_studios.add(full_key)
+                options.append({
+                    "id": r["id"],
+                    "hash": hash_val,
+                    "studio": studio,
+                    "season_label": s_label,
+                    "display_name": f"{studio}{(' • ' + s_label) if s_label else ''}",
+                    "title": t,
+                    "quality": r.get("quality", "HD"),
+                    "seeds": r.get("seeds", 0),
+                    "size": r.get("size", ""),
+                    "magnet": magnet,
+                    "source": r.get("source", "Rutor"),
+                    "is_active": is_active
+                })
 
     # Sort options by seeders descending
     options.sort(key=lambda x: x["seeds"], reverse=True)
 
     return {
-        "query": query,
-        "options": options[:8]
+        "query": clean_q,
+        "options": options[:15]
     }
 
 @app.head("/api/stream/browser")

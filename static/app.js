@@ -1584,10 +1584,11 @@ async function startNetflixStream(item, episodeFileId = null, initialSeekTime = 
   spinnerText.textContent = initialSeekTime > 0 ? 'Переключение озвучки...' : 'Подключение к раздаче в обход VPN...';
 
   // Extract clean movie/show title for dubbing switcher
-  const rawTitle = (item.curated_category || item.ru_title || (item.title ? item.title.split('/')[0].trim().replace(/\(\d{4}\).*$/, '').trim() : '') || state.activeMovie?.title || '').trim();
-  if (rawTitle) {
-    state.activeMovieTitle = rawTitle;
+  const cleanTitle = getCleanMovieTitle(item);
+  if (cleanTitle) {
+    state.activeMovieTitle = cleanTitle;
   }
+  state.activeTorrentItem = item;
 
   if (initialSeekTime === 0) {
     state.audioSyncOffset = 0;
@@ -1824,12 +1825,42 @@ function cancelNextEpisodeCountdown() {
   state.pendingNextFile = null;
 }
 
+function getCleanMovieTitle(item) {
+  if (state.activeMovie?.title && state.activeMovie.title !== 'movie' && !state.activeMovie.title.includes('качество')) {
+    return state.activeMovie.title.trim();
+  }
+  if (item?.ru_title) {
+    return item.ru_title.trim();
+  }
+  if (item?.display_title && !item.display_title.includes('качество')) {
+    return item.display_title.trim();
+  }
+  if (item?.title) {
+    let t = item.title;
+    t = t.split('/')[0].trim();
+    t = t.split('[')[0].trim();
+    t = t.replace(/\(\d{4}\).*$/, '').trim();
+    if (!t.includes('качество') && !t.includes('Full HD') && !t.includes('Золотой стандарт') && !t.includes('4K')) {
+      return t;
+    }
+  }
+  return state.activeMovieTitle || '';
+}
+
 // Audio Tracks & Mode Handling
 function toggleAudioDropdown() {
   const isHidden = playerAudioMenu.style.display === 'none';
   playerAudioMenu.style.display = isHidden ? 'block' : 'none';
   if (playerSpeedMenu) playerSpeedMenu.style.display = 'none';
   if (playerEpisodesDrawer) playerEpisodesDrawer.style.display = 'none';
+
+  if (isHidden) {
+    const title = getCleanMovieTitle(state.activeTorrentItem);
+    loadDubbingOptions(title, state.activeTorrentHash);
+    if (state.activeTorrentHash && state.activeFileIndex !== undefined) {
+      loadAudioTracks(state.activeTorrentHash, state.activeFileIndex);
+    }
+  }
 }
 
 function setAudioMode(mode) {
@@ -1907,15 +1938,16 @@ function renderAudioTracksMenu() {
 async function loadDubbingOptions(title, currentHash) {
   const container = document.getElementById('dubbingOptionsList');
   if (!container) return;
-  if (!title) {
+  const effectiveTitle = title || getCleanMovieTitle(state.activeTorrentItem);
+  if (!effectiveTitle) {
     container.innerHTML = '<div style="padding: 8px 12px; color: #888; font-size: 0.8rem;">Название не определено</div>';
     return;
   }
 
-  container.innerHTML = '<div style="padding: 10px; color: #888; font-size: 0.85rem; text-align: center;"><div class="n-spinner-mini" style="display:inline-block; margin-right:6px;"></div> Поиск доступных озвучек...</div>';
+  container.innerHTML = '<div style="padding: 10px; color: #888; font-size: 0.85rem; text-align: center;"><div class="netflix-spinner-circle" style="width:16px; height:16px; border-width:2px; display:inline-block; margin-right:6px; vertical-align:middle;"></div> Поиск доступных озвучек...</div>';
 
   try {
-    const res = await fetch(`/api/stream/dubbing-options?query=${encodeURIComponent(title)}&current_hash=${encodeURIComponent(currentHash || '')}`);
+    const res = await fetch(`/api/stream/dubbing-options?query=${encodeURIComponent(effectiveTitle)}&current_hash=${encodeURIComponent(currentHash || '')}`);
     if (!res.ok) {
       container.innerHTML = '<div style="padding: 8px 12px; color: #888; font-size: 0.8rem;">Не удалось загрузить озвучки</div>';
       return;
@@ -1946,13 +1978,13 @@ function renderDubbingOptions(options) {
       <div class="n-drop-item dubbing-opt-item ${isActive ? 'active' : ''}" onclick="switchDubbingRelease(${idx})">
         <div style="display:flex; justify-content:space-between; align-items:center; width:100%; gap:8px;">
           <div style="display:flex; align-items:center; gap:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-            ${isActive ? '<span style="color:#46d369; font-weight:bold;">✓</span>' : '<span style="color:#666;">•</span>'}
+            ${isActive ? '<span style="color:#46d369; font-weight:bold;">✓</span>' : '<span style="color:#888;">🎙️</span>'}
             <span style="font-weight:600; color:${isActive ? '#46d369' : '#fff'}; overflow:hidden; text-overflow:ellipsis;">
               ${escapeHtml(opt.display_name || opt.studio)}
             </span>
           </div>
           <div style="font-size:0.75rem; color:#aaa; white-space:nowrap; flex-shrink:0;">
-            <span style="color:#46d369;">⚡${opt.seeds}</span> • ${opt.quality || 'HD'} • ${opt.size || ''}
+            <span style="color:#46d369; font-weight:700;">⚡${opt.seeds}</span> • ${opt.quality || 'HD'}
           </div>
         </div>
       </div>
