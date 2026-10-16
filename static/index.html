@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="referrer" content="no-referrer">
-  <title>Netflix — Смотрите фильмы и сериалы онлайн</title>
-  <link rel="stylesheet" href="style.css?v=2.8">
+  <title>KinoFlix — Смотрите фильмы и сериалы онлайн</title>
+  <link rel="stylesheet" href="style.css?v=2.9">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -13,10 +13,9 @@
 </head>
 <body class="netflix-body">
 
-  <!-- NETFLIX TOP NAVIGATION BAR -->
+  <!-- TOP NAVIGATION BAR -->
   <header class="netflix-header" id="netflixHeader">
     <div class="nav-left">
-      <div class="netflix-logo" onclick="goHome()">NETFLIX</div>
       <nav class="nav-links">
         <a class="nav-link active" id="navAll" onclick="switchCategory('all')">Главная</a>
         <a class="nav-link" id="navSeries" onclick="switchCategory('series')">Сериалы</a>
@@ -669,7 +668,7 @@
         <div class="n-input-group" style="margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.1);">
           <label>📺 Режим отображения (для управления пультом или мышью):</label>
           <select id="uiModeSelect" onchange="handleUiModeChange(this.value)">
-            <option value="desktop">Компьютер / Мышь (Стандартный Netflix)</option>
+            <option value="desktop">Компьютер / Мышь (Стандартный интерфейс)</option>
             <option value="tv">Режим для ТВ (Пульт, навигация стрелками D-Pad)</option>
           </select>
         </div>
@@ -730,6 +729,6 @@
   <!-- Toast Notification Container -->
   <div id="toastContainer" style="position: fixed; top: 24px; right: 24px; z-index: 999999; display: flex; flex-direction: column; gap: 10px; pointer-events: none;"></div>
 
-  <script src="app.js?v=2.8"></script>
+  <script src="app.js?v=2.9"></script>
 </body>
 </html>
