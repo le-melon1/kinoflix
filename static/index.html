@@ -458,12 +458,32 @@
                   <path d="M12 3v9.28a4.39 4.39 0 0 0-1.5-.28C8.01 12 6 14.01 6 16.5S8.01 21 10.5 21c2.31 0 4.2-1.75 4.45-4H15V6h4V3h-7z"/>
                 </svg>
               </button>
-              <div class="n-dropdown-menu" id="playerAudioMenu" style="display: none;">
-                <div class="n-drop-header">Режим звука</div>
-                <div class="n-drop-item active" id="audioModeAac" onclick="setAudioMode('aac')">🔊 Браузер (AAC Stereo, 100% со звуком)</div>
-                <div class="n-drop-item" id="audioModeDirect" onclick="setAudioMode('direct')">🎬 Прямой (Без перекодирования)</div>
-                <div class="n-drop-header" id="audioTracksHeader" style="display:none; margin-top:6px; border-top:1px solid #333; padding-top:6px;">Аудиодорожки</div>
+              <div class="n-dropdown-menu" id="playerAudioMenu" style="display: none; min-width: 330px; max-height: 480px; overflow-y: auto;">
+                <!-- Dubbing Studios from Releases -->
+                <div class="n-drop-header" id="dubbingOptionsHeader">🎙️ Озвучка / Студия перевода</div>
+                <div id="dubbingOptionsList">
+                  <div style="padding: 10px; color: #888; font-size: 0.85rem; text-align: center;">Поиск доступных озвучек...</div>
+                </div>
+
+                <!-- Internal Audio Tracks -->
+                <div class="n-drop-header" id="audioTracksHeader" style="display:none; margin-top:8px; border-top:1px solid rgba(255,255,255,0.1); padding-top:8px;">🎧 Дорожки текущей раздачи</div>
                 <div id="audioTracksList"></div>
+
+                <!-- Audio Sync Fine Tuning -->
+                <div class="n-drop-header" style="margin-top:8px; border-top:1px solid rgba(255,255,255,0.1); padding-top:8px;">⏱️ Синхронизация звука (Задержка)</div>
+                <div style="display:flex; gap:6px; padding: 6px 12px; align-items:center; justify-content:space-between;">
+                  <button class="n-sync-btn" onclick="adjustAudioSync(-0.25)" title="Звук раньше на 250 мс">-0.25с</button>
+                  <button class="n-sync-btn" onclick="adjustAudioSync(-0.1)" title="Звук раньше на 100 мс">-0.10с</button>
+                  <span id="audioSyncOffsetVal" style="color:#ffcc00; font-size:0.82rem; font-weight:700;">0.00с</span>
+                  <button class="n-sync-btn" onclick="adjustAudioSync(0.1)" title="Звук позже на 100 мс">+0.10с</button>
+                  <button class="n-sync-btn" onclick="adjustAudioSync(0.25)" title="Звук позже на 250 мс">+0.25с</button>
+                  <button class="n-sync-btn" onclick="resetAudioSync()" title="Сбросить синхронизацию" style="color:#aaa;">Сброс</button>
+                </div>
+
+                <!-- Sound Engine Mode -->
+                <div class="n-drop-header" style="margin-top:8px; border-top:1px solid rgba(255,255,255,0.1); padding-top:8px;">⚙️ Режим декодера</div>
+                <div class="n-drop-item active" id="audioModeAac" onclick="setAudioMode('aac')">🔊 Браузер (AAC Stereo, синхронизация 100%)</div>
+                <div class="n-drop-item" id="audioModeDirect" onclick="setAudioMode('direct')">🎬 Прямой (Без перекодирования)</div>
               </div>
             </div>
 

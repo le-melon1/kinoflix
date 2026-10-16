@@ -265,6 +265,96 @@ async def stream_stop(req: StreamStopRequest):
     await torrserver_mgr.drop_torrent(req.torrent_hash)
     return {"status": "dropped"}
 
+@app.get("/api/stream/dubbing-options")
+async def get_dubbing_options(
+    query: str = Query(..., min_length=1),
+    current_hash: Optional[str] = None
+):
+    """
+    Returns available voiceover/dubbing studio options across all torrent releases for this movie/show.
+    Enables instant switching of dubbing studios directly in the video player.
+    """
+    from backend.rutor import search_rutor
+    from backend.metadata import extract_season_info
+    
+    def extract_studio_label(title: str) -> str:
+        t_low = title.lower()
+        if "red head sound" in t_low or re.search(r'\brhs\b', t_low):
+            return "Red Head Sound (RHS)"
+        if "hdrezka" in t_low or "rezka" in t_low:
+            return "HDRezka Studio"
+        if "lostfilm" in t_low:
+            return "LostFilm"
+        if "кубик в кубе" in t_low or "kubik v kube" in t_low:
+            return "Кубик в Кубе"
+        if "iyuno" in t_low or "невафильм" in t_low or "пифагор" in t_low:
+            return "Официальный дубляж (Netflix / Лицензия)"
+        if "flarrow" in t_low:
+            return "Flarrow Films"
+        if "newstudio" in t_low:
+            return "NewStudio"
+        if "tvshows" in t_low:
+            return "TVShows"
+        if "alexfilm" in t_low:
+            return "AlexFilm"
+        if "jaskier" in t_low:
+            return "Jaskier"
+        if "сыендук" in t_low or "sndk" in t_low:
+            return "Сыендук"
+        if "дублирован" in t_low or "дубляж" in t_low or "лицензия" in t_low:
+            return "Полный дубляж (Лицензия)"
+        if "многоголос" in t_low or " mvo " in t_low:
+            return "Профессиональный (Многоголосый)"
+        if "двухголос" in t_low or " dvo " in t_low:
+            return "Двухголосый закадровый"
+        if "оригинал" in t_low or "english" in t_low or "субтитр" in t_low:
+            return "Оригинал + Субтитры"
+        return "Русская озвучка"
+
+    results = await search_rutor(query, limit=35, min_seeds=2)
+    options = []
+    seen_studios = set()
+
+    for r in results:
+        t_low = r.get("title", "").lower()
+        if any(bad in t_low for bad in ["обои", "wallpaper", "soundtrack", " ost ", "ost]", "книга", "комикс", "mp3", "flac"]):
+            continue
+        studio = extract_studio_label(r.get("title", ""))
+        s_label, _, _, _ = extract_season_info(r.get("title", ""))
+        full_key = f"{studio}_{s_label or 'all'}"
+        magnet = r.get("magnet") or ""
+        m_hash = re.search(r'urn:btih:([a-zA-Z0-9]+)', magnet, re.IGNORECASE)
+        hash_val = m_hash.group(1).lower() if m_hash else None
+
+        is_active = False
+        if current_hash and hash_val and current_hash.lower() == hash_val.lower():
+            is_active = True
+
+        if full_key not in seen_studios:
+            seen_studios.add(full_key)
+            options.append({
+                "id": r["id"],
+                "hash": hash_val,
+                "studio": studio,
+                "season_label": s_label,
+                "display_name": f"{studio}{(' • ' + s_label) if s_label else ''}",
+                "title": r["title"],
+                "quality": r.get("quality", "HD"),
+                "seeds": r.get("seeds", 0),
+                "size": r.get("size", ""),
+                "magnet": magnet,
+                "source": r.get("source", "Rutor"),
+                "is_active": is_active
+            })
+
+    # Sort options by seeders descending
+    options.sort(key=lambda x: x["seeds"], reverse=True)
+
+    return {
+        "query": query,
+        "options": options[:8]
+    }
+
 @app.head("/api/stream/browser")
 async def stream_browser_audio_head(link: str, index: int = 1):
     return Response(
@@ -282,14 +372,15 @@ async def stream_browser_audio(
     link: str,
     index: int = 1,
     audio: Optional[int] = None,
-    ss: Optional[float] = None
+    ss: Optional[float] = None,
+    audio_delay: Optional[float] = 0.0
 ):
     """
     On-the-fly stream with AAC audio transcoding for Google Chrome.
     Copies video track with zero re-encoding (-c:v copy, 0% CPU),
     converts AC3/DTS/EAC3 audio to AAC stereo in real-time.
-    Supports seeking via ?ss=<seconds>.
-    Automatically selects Russian audio track if not specified.
+    Supports seeking via ?ss=<seconds> and audio offset via ?audio_delay=<seconds>.
+    Includes sample-accurate aresample synchronization to prevent audio lag.
     """
     torr_url = f"http://127.0.0.1:8090/stream/stream.mkv?link={link}&index={index}&play"
     ffmpeg_bin = "/opt/homebrew/bin/ffmpeg" if os.path.exists("/opt/homebrew/bin/ffmpeg") else "ffmpeg"
@@ -328,6 +419,7 @@ async def stream_browser_audio(
     cmd = [
         ffmpeg_bin,
         "-loglevel", "error",
+        "-fflags", "+genpts+discardcorrupt",
     ]
     if ss and ss > 0:
         cmd.extend(["-ss", str(ss)])
@@ -337,10 +429,24 @@ async def stream_browser_audio(
         "-map", f"0:a:{audio_idx}?",
     ])
     cmd.extend(video_args)
+
+    af_filters = []
+    if audio_delay and abs(audio_delay) >= 0.02:
+        if audio_delay > 0:
+            delay_ms = int(audio_delay * 1000)
+            af_filters.append(f"adelay={delay_ms}|{delay_ms}")
+        else:
+            advance_sec = abs(audio_delay)
+            af_filters.append(f"atrim=start={advance_sec},asetpts=PTS-STARTPTS")
+    af_filters.append("aresample=async=1000:first_pts=0")
+
     cmd.extend([
         "-c:a", "aac",
         "-b:a", "256k",
         "-ac", "2",
+        "-af", ",".join(af_filters),
+        "-avoid_negative_ts", "make_zero",
+        "-max_muxing_queue_size", "4096",
         "-f", "mp4",
         "-movflags", "frag_keyframe+empty_moov+default_base_moof",
         "pipe:1"

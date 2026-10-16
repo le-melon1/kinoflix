@@ -1619,6 +1619,35 @@ body.netflix-body {
 .n-drop-item:hover { background-color: rgba(255, 255, 255, 0.12); color: #fff; }
 .n-drop-item.active { color: var(--netflix-red); font-weight: 700; background-color: rgba(229, 9, 20, 0.12); }
 
+#playerAudioMenu {
+  min-width: 340px;
+  max-width: 440px;
+  max-height: 480px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.n-sync-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border-radius: 4px;
+  padding: 4px 7px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.n-sync-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.dubbing-opt-item {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.dubbing-opt-item:last-child {
+  border-bottom: none;
+}
+
 /* Player Episodes Drawer */
 .n-player-episodes-drawer {
   position: absolute;

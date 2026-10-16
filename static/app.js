@@ -17,6 +17,9 @@ const state = {
   audioMode: 'aac', // 'aac' or 'direct'
   activeAudioTrack: 0,
   audioTracks: [],
+  audioSyncOffset: 0,
+  availableDubbings: [],
+  activeMovieTitle: '',
   mediaDuration: 0,
   currentSeekOffset: 0,
   nextEpCountdownTimer: null,
@@ -77,7 +80,6 @@ const billboardDuration = document.getElementById('billboardDuration');
 const billboardQuality = document.getElementById('billboardQuality');
 const billboardAudio = document.getElementById('billboardAudio');
 const billboardPlot = document.getElementById('billboardPlot');
-const rowsContainer = document.getElementById('rowsContainer');
 
 // Modal DOM
 const movieDetailModal = document.getElementById('movieDetailModal');
@@ -1288,18 +1290,30 @@ function getStreamUrlForFile(hash, fileId) {
     // Guaranteed sound in Google Chrome/Safari with on-the-fly AAC audio transmuxing
     const audioIdx = state.activeAudioTrack || 0;
     const ssParam = (state.currentSeekOffset && state.currentSeekOffset > 0) ? `&ss=${state.currentSeekOffset}` : '';
-    return `/api/stream/browser?link=${hash}&index=${fileId}&audio=${audioIdx}${ssParam}`;
+    const delayParam = (state.audioSyncOffset && Math.abs(state.audioSyncOffset) >= 0.02) ? `&audio_delay=${state.audioSyncOffset}` : '';
+    return `/api/stream/browser?link=${hash}&index=${fileId}&audio=${audioIdx}${ssParam}${delayParam}`;
   }
 }
 
-async function startNetflixStream(item, episodeFileId = null) {
+async function startNetflixStream(item, episodeFileId = null, initialSeekTime = 0) {
   closeDetailModal();
   cancelNextEpisodeCountdown();
   netflixPlayerView.style.display = 'flex';
   playerTitle.textContent = item.curated_category || item.title;
   playerSubtitle.textContent = `${item.quality || 'HD'} • ${item.audio || 'Дубляж'} • В обход VPN`;
   playerSpinner.style.display = 'flex';
-  spinnerText.textContent = 'Подключение к раздаче в обход VPN...';
+  spinnerText.textContent = initialSeekTime > 0 ? 'Переключение озвучки...' : 'Подключение к раздаче в обход VPN...';
+
+  // Extract clean movie/show title for dubbing switcher
+  const rawTitle = (item.curated_category || item.ru_title || (item.title ? item.title.split('/')[0].trim().replace(/\(\d{4}\).*$/, '').trim() : '') || state.activeMovie?.title || '').trim();
+  if (rawTitle) {
+    state.activeMovieTitle = rawTitle;
+  }
+
+  if (initialSeekTime === 0) {
+    state.audioSyncOffset = 0;
+    updateAudioSyncUI();
+  }
 
   try {
     const payload = {
@@ -1331,11 +1345,18 @@ async function startNetflixStream(item, episodeFileId = null) {
     state.activeTorrentHash = data.hash;
     state.videoFiles = data.video_files || [];
     state.seasons = data.seasons || {};
-    state.activeFileIndex = (episodeFileId !== null) ? episodeFileId : (data.default_index || 0);
+    if (episodeFileId !== null) {
+      state.activeFileIndex = episodeFileId;
+    } else if (item.targetEpisodeNum) {
+      const match = state.videoFiles.find(f => f.episode === item.targetEpisodeNum && (!item.targetSeasonNum || f.season === item.targetSeasonNum));
+      state.activeFileIndex = match ? match.id : (data.default_index || 0);
+    } else {
+      state.activeFileIndex = data.default_index || 0;
+    }
 
     const activeFile = state.videoFiles.find(f => f.id === state.activeFileIndex) || state.videoFiles[0];
     if (activeFile && (activeFile.title || activeFile.name)) {
-      playerTitle.textContent = `${item.curated_category || item.title} • ${activeFile.title || activeFile.name}`;
+      playerTitle.textContent = `${state.activeMovieTitle || item.curated_category || item.title} • ${activeFile.title || activeFile.name}`;
       if (activeFile.season) {
         state.currentDrawerSeason = String(activeFile.season);
       }
@@ -1353,12 +1374,13 @@ async function startNetflixStream(item, episodeFileId = null) {
     }
 
     // Set duration from episode/torrent/catalog metadata
-    state.currentSeekOffset = 0;
+    state.currentSeekOffset = initialSeekTime || 0;
     state.mediaDuration = (activeFile && activeFile.duration_seconds) || data.duration || item.duration_seconds || state.activeMovie?.duration_seconds || 5400;
     playerDuration.textContent = formatTime(state.mediaDuration);
-    playerCurrentTime.textContent = '0:00';
-    playerProgressPlayed.style.width = '0%';
-    playerScrubberHandle.style.left = '0%';
+    playerCurrentTime.textContent = formatTime(state.currentSeekOffset);
+    const initialPercent = (state.mediaDuration > 0 && state.currentSeekOffset > 0) ? (state.currentSeekOffset / state.mediaDuration) * 100 : 0;
+    playerProgressPlayed.style.width = `${initialPercent}%`;
+    playerScrubberHandle.style.left = `${initialPercent}%`;
 
     // Set video src with audio guaranteed
     state.currentStreamUrl = getStreamUrlForFile(state.activeTorrentHash, state.activeFileIndex);
@@ -1367,10 +1389,14 @@ async function startNetflixStream(item, episodeFileId = null) {
     netflixVideo.volume = parseFloat(playerVolumeSlider ? playerVolumeSlider.value : 1.0);
     updateVolumeIcons();
     netflixVideo.load();
+    if (initialSeekTime > 0 && state.audioMode === 'direct') {
+      netflixVideo.currentTime = initialSeekTime;
+    }
     netflixVideo.play().catch(e => console.log('Autoplay deferred:', e));
 
     startStatsPolling();
     loadAudioTracks(state.activeTorrentHash, state.activeFileIndex);
+    loadDubbingOptions(state.activeMovieTitle, state.activeTorrentHash);
 
   } catch (err) {
     alert('Ошибка запуска: ' + err.message);
@@ -1585,6 +1611,124 @@ function renderAudioTracksMenu() {
   `).join('');
 }
 
+async function loadDubbingOptions(title, currentHash) {
+  const container = document.getElementById('dubbingOptionsList');
+  if (!container) return;
+  if (!title) {
+    container.innerHTML = '<div style="padding: 8px 12px; color: #888; font-size: 0.8rem;">Название не определено</div>';
+    return;
+  }
+
+  container.innerHTML = '<div style="padding: 10px; color: #888; font-size: 0.85rem; text-align: center;"><div class="n-spinner-mini" style="display:inline-block; margin-right:6px;"></div> Поиск доступных озвучек...</div>';
+
+  try {
+    const res = await fetch(`/api/stream/dubbing-options?query=${encodeURIComponent(title)}&current_hash=${encodeURIComponent(currentHash || '')}`);
+    if (!res.ok) {
+      container.innerHTML = '<div style="padding: 8px 12px; color: #888; font-size: 0.8rem;">Не удалось загрузить озвучки</div>';
+      return;
+    }
+    const data = await res.json();
+    renderDubbingOptions(data.options || []);
+  } catch (err) {
+    console.error('Dubbing options error:', err);
+    container.innerHTML = '<div style="padding: 8px 12px; color: #888; font-size: 0.8rem;">Ошибка поиска озвучек</div>';
+  }
+}
+
+function renderDubbingOptions(options) {
+  const container = document.getElementById('dubbingOptionsList');
+  if (!container) return;
+  state.availableDubbings = options || [];
+
+  if (!options || options.length === 0) {
+    container.innerHTML = '<div style="padding: 8px 12px; color: #888; font-size: 0.8rem;">Других озвучек не найдено</div>';
+    return;
+  }
+
+  const curHash = (state.activeTorrentHash || '').toLowerCase();
+
+  container.innerHTML = options.map((opt, idx) => {
+    const isActive = opt.is_active || (opt.hash && curHash && opt.hash.toLowerCase() === curHash);
+    return `
+      <div class="n-drop-item dubbing-opt-item ${isActive ? 'active' : ''}" onclick="switchDubbingRelease(${idx})">
+        <div style="display:flex; justify-content:space-between; align-items:center; width:100%; gap:8px;">
+          <div style="display:flex; align-items:center; gap:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+            ${isActive ? '<span style="color:#46d369; font-weight:bold;">✓</span>' : '<span style="color:#666;">•</span>'}
+            <span style="font-weight:600; color:${isActive ? '#46d369' : '#fff'}; overflow:hidden; text-overflow:ellipsis;">
+              ${escapeHtml(opt.display_name || opt.studio)}
+            </span>
+          </div>
+          <div style="font-size:0.75rem; color:#aaa; white-space:nowrap; flex-shrink:0;">
+            <span style="color:#46d369;">⚡${opt.seeds}</span> • ${opt.quality || 'HD'} • ${opt.size || ''}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function switchDubbingRelease(idx) {
+  const opt = state.availableDubbings[idx];
+  if (!opt) return;
+
+  const curHash = (state.activeTorrentHash || '').toLowerCase();
+  if (opt.hash && opt.hash.toLowerCase() === curHash) {
+    if (playerAudioMenu) playerAudioMenu.style.display = 'none';
+    return;
+  }
+
+  const curTime = Math.floor(getEffectiveCurrentTime());
+  if (playerAudioMenu) playerAudioMenu.style.display = 'none';
+
+  playerSpinner.style.display = 'flex';
+  spinnerText.textContent = `Переключение на озвучку «${opt.studio}»...`;
+
+  const curEp = (state.videoFiles && state.videoFiles.length > 1) ? state.videoFiles.find(f => f.id === state.activeFileIndex) : null;
+
+  startNetflixStream({
+    title: opt.title,
+    curated_category: state.activeMovieTitle,
+    magnet: opt.magnet,
+    quality: opt.quality,
+    audio: opt.studio,
+    source: opt.source,
+    targetEpisodeNum: curEp ? curEp.episode : null,
+    targetSeasonNum: curEp ? curEp.season : null
+  }, null, curTime);
+}
+
+function adjustAudioSync(delta) {
+  state.audioSyncOffset = Math.round((state.audioSyncOffset + delta) * 100) / 100;
+  updateAudioSyncUI();
+  applyAudioSync();
+}
+
+function resetAudioSync() {
+  state.audioSyncOffset = 0.0;
+  updateAudioSyncUI();
+  applyAudioSync();
+}
+
+function updateAudioSyncUI() {
+  const el = document.getElementById('audioSyncOffsetVal');
+  if (el) {
+    const sign = state.audioSyncOffset > 0 ? '+' : '';
+    el.textContent = `${sign}${state.audioSyncOffset.toFixed(2)}с`;
+    el.style.color = state.audioSyncOffset === 0 ? '#aaa' : '#ffcc00';
+  }
+}
+
+function applyAudioSync() {
+  if (state.audioMode === 'aac') {
+    const cur = Math.floor(getEffectiveCurrentTime());
+    state.currentSeekOffset = cur;
+    state.currentStreamUrl = getStreamUrlForFile(state.activeTorrentHash, state.activeFileIndex);
+    netflixVideo.src = state.currentStreamUrl;
+    netflixVideo.load();
+    netflixVideo.play().catch(() => {});
+  }
+}
+
 async function exitNetflixPlayer() {
   cancelNextEpisodeCountdown();
   netflixVideo.pause();
@@ -1720,8 +1864,7 @@ function seekToTime(targetSeconds) {
     playerProgressPlayed.style.width = `${percent}%`;
     playerScrubberHandle.style.left = `${percent}%`;
     playerCurrentTime.textContent = formatTime(target);
-
-    state.currentStreamUrl = `/api/stream/browser?link=${state.activeTorrentHash}&index=${state.activeFileIndex}&audio=${state.activeAudioTrack}&ss=${target}`;
+    state.currentStreamUrl = getStreamUrlForFile(state.activeTorrentHash, state.activeFileIndex);
     netflixVideo.src = state.currentStreamUrl;
     netflixVideo.load();
     netflixVideo.play().catch(e => console.log('Seek play notice:', e));
