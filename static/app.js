@@ -1354,7 +1354,7 @@ function renderModalEpisodesList(movie) {
         </div>
         <div class="ep-card-meta-row">
           <span class="ep-meta-pill">💾 ${ep.size_str || (ep.size_mb + ' МБ')}</span>
-          <span class="ep-meta-pill" style="color:#46d369;">⚡ в обход VPN</span>
+          <span class="ep-meta-pill" style="color:#46d369;">⚡ Прямой поток</span>
         </div>
         <p class="ep-card-synopsis">Нажмите для мгновенного просмотра серии со звуком.</p>
       </div>
@@ -1594,9 +1594,9 @@ async function startNetflixStream(item, episodeFileId = null, initialSeekTime = 
   cancelNextEpisodeCountdown();
   netflixPlayerView.style.display = 'flex';
   playerTitle.textContent = item.curated_category || item.title;
-  playerSubtitle.textContent = `${item.quality || 'HD'} • ${item.audio || 'Дубляж'} • В обход VPN`;
+  playerSubtitle.textContent = `${item.quality || 'HD'} • ${item.audio || 'Дубляж'} • Прямой поток`;
   playerSpinner.style.display = 'flex';
-  spinnerText.textContent = initialSeekTime > 0 ? 'Переключение озвучки...' : 'Подключение к раздаче в обход VPN...';
+  spinnerText.textContent = initialSeekTime > 0 ? 'Переключение озвучки...' : 'Подключение к раздаче...';
 
   // Reset stream health state and health pill styles
   state.streamHealth = {
@@ -2525,8 +2525,9 @@ function startStatsPolling() {
               }
             }
 
+            const vpnLabel = stats.vpn_active ? 'В обход VPN' : 'Прямой поток';
             if (!state.streamHealth.isWarning) {
-              playerHealthText.textContent = `⚡ В обход VPN (en0) • ${stats.download_speed_mb} МБ/с • ${stats.active_peers} пиров • Буфер: ${stats.buffer_percent}%`;
+              playerHealthText.textContent = `⚡ ${vpnLabel} • ${stats.download_speed_mb} МБ/с • ${stats.active_peers} пиров • Буфер: ${stats.buffer_percent}%`;
             }
 
             if (stats.buffer_percent > 0 && stats.buffer_percent < 100) {
@@ -2534,7 +2535,8 @@ function startStatsPolling() {
             }
           }
         } else {
-          playerHealthText.textContent = `⚡ В обход VPN (en0) • ${stats.download_speed_mb} МБ/с • ${stats.active_peers} пиров • Буфер: ${stats.buffer_percent}%`;
+          const vpnLabel = stats.vpn_active ? 'В обход VPN' : 'Прямой поток';
+          playerHealthText.textContent = `⚡ ${vpnLabel} • ${stats.download_speed_mb} МБ/с • ${stats.active_peers} пиров • Буфер: ${stats.buffer_percent}%`;
         }
 
         if (stats.is_ready) {
@@ -3184,7 +3186,7 @@ async function launchMovieDirectly(item) {
   const q = item.search_query || item.title;
   netflixPlayerView.style.display = 'flex';
   playerTitle.textContent = item.title;
-  playerSubtitle.textContent = 'Мгновенный запуск фильма в обход VPN...';
+  playerSubtitle.textContent = 'Мгновенный запуск фильма...';
   playerSpinner.style.display = 'flex';
   spinnerText.textContent = `Подключение к «${item.title}»...`;
 

@@ -15,9 +15,20 @@ TORRSERVER_PORT = 8090
 TORRSERVER_URL = f"http://127.0.0.1:{TORRSERVER_PORT}"
 TORRSERVER_DIR = os.path.expanduser("~/.config/kinoflix/torrserver")
 
+def is_vpn_active() -> bool:
+    try:
+        out = subprocess.check_output(['netstat', '-rn', '-f', 'inet'], text=True)
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 4 and parts[0] == 'default' and (parts[3].startswith('utun') or parts[3].startswith('ppp') or parts[3].startswith('tun')):
+                return True
+    except Exception:
+        pass
+    return False
+
 def get_physical_net_info() -> Tuple[str, str, Optional[str]]:
     """
-    Find physical network interface (e.g. en0) and its IP to bypass VPN.
+    Find physical network interface (e.g. en0) and its IP to route traffic directly.
     """
     try:
         out = subprocess.check_output(['netstat', '-rn', '-f', 'inet'], text=True)
@@ -32,6 +43,15 @@ def get_physical_net_info() -> Tuple[str, str, Optional[str]]:
                 return iface, ip, gw
     except Exception as e:
         print(f"Error detecting physical network: {e}")
+    # Fallback to en0 if default didn't start with en
+    try:
+        ifconf = subprocess.check_output(['ifconfig', 'en0'], text=True)
+        m = re.search(r'inet\s+(\d+\.\d+\.\d+\.\d+)', ifconf)
+        if m:
+            return "en0", m.group(1), None
+    except Exception:
+        pass
+    return "en0", "127.0.0.1", None
 def parse_series_episodes(video_files: List[Dict[str, Any]], default_season: int = 1) -> Dict[str, Any]:
     """
     Groups torrent video files by season and episode like Netflix.
@@ -241,24 +261,29 @@ class TorrServerManager:
         if not os.path.exists(TORRSERVER_BIN):
             raise FileNotFoundError(f"TorrServer binary not found at {TORRSERVER_BIN}")
         
-        # Detect physical interface to bypass VPN
+        # Detect physical interface and VPN status
+        vpn_on = is_vpn_active()
         self.physical_iface = iface
         self.physical_ip = ip
 
-        # Prepare environment with dynamic library interposer for physical VPN bypass
+        # Prepare environment
         env = os.environ.copy()
         env["PATH"] = f"/opt/homebrew/bin:{env.get('PATH', '')}"
-        if os.path.exists(BIND_DIRECT_DYLIB):
+
+        # If VPN is active, route p2p traffic through physical interface directly
+        # If VPN is NOT active, run TorrServer natively on standard system network
+        if vpn_on and os.path.exists(BIND_DIRECT_DYLIB):
             env["DYLD_INSERT_LIBRARIES"] = BIND_DIRECT_DYLIB
             env["PHYSICAL_INTERFACE"] = self.physical_iface
 
-        # Command: bind torrent p2p traffic to physical interface IP
+        # Command: bind torrent p2p traffic
         cmd = [
             TORRSERVER_BIN,
             "--port", str(TORRSERVER_PORT),
-            "--path", TORRSERVER_DIR,
-            "--torrentaddr", f"{self.physical_ip}:0"
+            "--path", TORRSERVER_DIR
         ]
+        if self.physical_ip and self.physical_ip != "127.0.0.1":
+            cmd.extend(["--torrentaddr", f"{self.physical_ip}:0"])
 
         self.process = subprocess.Popen(
             cmd,
@@ -461,6 +486,7 @@ class TorrServerManager:
                 elif stat in (2, 3):
                     buf_percent = 100
 
+                vpn_on = is_vpn_active()
                 return {
                     "active": True,
                     "stat": stat,
@@ -471,7 +497,8 @@ class TorrServerManager:
                     "total_peers": total_peers,
                     "buffer_percent": buf_percent,
                     "is_ready": stat >= 2 or buf_percent >= 90,
-                    "bypass_vpn": True
+                    "vpn_active": vpn_on,
+                    "bypass_vpn": vpn_on
                 }
         except Exception:
             return {"active": False}

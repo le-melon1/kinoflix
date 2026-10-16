@@ -5,8 +5,9 @@ import httpx
 
 RUTOR_MIRRORS = [
     "http://rutor.info",
+    "https://rutor.info",
     "http://rutor.is",
-    "https://torrsearch.rutor.info"
+    "https://rutor.is"
 ]
 
 HEADERS = {
@@ -58,7 +59,7 @@ async def search_rutor(query: str, limit: int = 40, min_seeds: int = 2) -> List[
     encoded_query = urllib.parse.quote(query)
     results: List[Dict[str, Any]] = []
 
-    async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=3.5, follow_redirects=True) as client:
         for mirror in RUTOR_MIRRORS:
             # Formula: /search/0/0/000/2/query sorts by seeds descending
             url = f"{mirror}/search/0/0/000/2/{encoded_query}"

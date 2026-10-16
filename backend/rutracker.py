@@ -20,16 +20,22 @@ def is_port_open(host: str, port: int, timeout: float = 0.5) -> bool:
         return False
 
 def detect_best_proxy() -> Optional[str]:
-    """Auto-detect active local VPN/proxy like v2RayTun or Clash"""
+    """Auto-detect active local VPN/proxy like v2RayTun or Clash or NekoRay"""
     # 1. v2RayTun HTTP proxy
     if is_port_open("127.0.0.1", 10809):
         return "http://127.0.0.1:10809"
-    # 2. v2RayTun SOCKS5 proxy
+    # 2. v2RayTun / Shadowsocks SOCKS5 proxy
     if is_port_open("127.0.0.1", 10808):
         return "socks5://127.0.0.1:10808"
-    # 3. Clash HTTP proxy
-    if is_port_open("127.0.0.1", 7890):
-        return "http://127.0.0.1:7890"
+    # 3. Clash / Mihomo proxy
+    if is_port_open("127.0.0.1", 7891):
+        return "socks5://127.0.0.1:7891"
+    # 4. NekoRay / Xray HTTP proxy
+    if is_port_open("127.0.0.1", 2081):
+        return "http://127.0.0.1:2081"
+    # 5. Generic SOCKS5
+    if is_port_open("127.0.0.1", 1080):
+        return "socks5://127.0.0.1:1080"
     return None
 
 class RuTrackerClient:

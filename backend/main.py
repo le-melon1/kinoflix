@@ -60,16 +60,18 @@ async def shutdown_event():
 
 @app.get("/api/network/status")
 async def get_network_status():
-    from backend.torrserver import get_physical_net_info
+    from backend.torrserver import get_physical_net_info, is_vpn_active
+    vpn_on = is_vpn_active()
     iface, ip, gw = get_physical_net_info()
     proxy = rutracker_client.get_proxy()
     return {
+        "vpn_active": vpn_on,
         "physical_interface": iface,
         "physical_ip": ip,
         "physical_gateway": gw,
         "proxy_detected": proxy,
-        "rutracker_routing": f"Через VPN / Прокси ({proxy})" if proxy else "Через системный VPN",
-        "stream_routing": f"В обход VPN через {iface} (Прямой интернет)"
+        "rutracker_routing": f"Через VPN / Прокси ({proxy})" if proxy else ("Через системный VPN" if vpn_on else "Прямое подключение"),
+        "stream_routing": f"В обход VPN через {iface} (Прямой интернет)" if vpn_on else f"Прямой домашний интернет ({iface})"
     }
 
 @app.post("/api/settings/proxy")
