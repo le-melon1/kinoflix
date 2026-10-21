@@ -737,6 +737,17 @@ document.addEventListener('DOMContentLoaded', () => {
     setTvMode(true);
   }
 
+  if (netflixSearchInput) {
+    netflixSearchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        clearTimeout(state.searchTimeout);
+        const q = netflixSearchInput.value.trim();
+        if (q) performSearch(q);
+      }
+    });
+  }
+
   window.addEventListener('beforeunload', () => {
     if (state.activeTorrentHash) {
       navigator.sendBeacon('/api/stream/stop', JSON.stringify({ torrent_hash: state.activeTorrentHash }));
@@ -1665,7 +1676,10 @@ function switchCategory(cat) {
   updateCardFavoriteButtons();
 }
 
+let _currentSearchSeq = 0;
+
 async function performSearch(query) {
+  const thisSeq = ++_currentSearchSeq;
   homeView.style.display = 'none';
   searchResultsView.style.display = 'block';
   searchQueryLabel.textContent = `"${query}"`;
@@ -1675,10 +1689,12 @@ async function performSearch(query) {
   try {
     const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&source=${state.currentSource}`);
     const data = await res.json();
+    if (thisSeq !== _currentSearchSeq) return; // Discard stale out-of-order response
     searchLoader.style.display = 'none';
 
     renderSearchResults(data);
   } catch (err) {
+    if (thisSeq !== _currentSearchSeq) return;
     searchLoader.style.display = 'none';
     searchGrid.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding: 40px; color:#888;">Ошибка поиска: ${err.message}</div>`;
   }
@@ -1704,14 +1720,16 @@ function renderSearchResults(data) {
     return;
   }
 
+  state.currentSearchResults = results;
+
   // Render individual release cards with distinct covers and always-visible titles
-  let html = results.map(item => {
+  let html = results.map((item, idx) => {
     const cardTitle = item.display_title || item.title;
     const cardYear = item.display_year || item.year || '';
     // Prefer widescreen 16:9 backdrop so there is zero cropping on landscape cards
     const cardImg = item.backdrop || item.poster || generateCardSvg(cardTitle, cardYear, item.quality || 'HD');
     return `
-      <div class="grid-card" onclick="openTorrentReleaseModal(${JSON.stringify(item).replace(/"/g, '&quot;')})">
+      <div class="grid-card" onclick="openTorrentReleaseModalByIndex(${idx})">
         <div class="grid-card-poster-wrap">
           <img src="${cardImg}" class="grid-card-poster-img" alt="${escapeHtml(cardTitle)}" onerror="this.onerror=null; this.src=generateCardSvg('${escapeJs(cardTitle)}', '${escapeJs(cardYear)}', '${escapeJs(item.quality || 'HD')}');">
           <div class="grid-card-hover-overlay">
@@ -1736,6 +1754,14 @@ function renderSearchResults(data) {
 
   searchGrid.innerHTML = html;
 }
+
+function openTorrentReleaseModalByIndex(idx) {
+  const item = state.currentSearchResults && state.currentSearchResults[idx];
+  if (item) {
+    openTorrentReleaseModal(item);
+  }
+}
+window.openTorrentReleaseModalByIndex = openTorrentReleaseModalByIndex;
 
 // --- NETFLIX DETAIL & EDITIONS MODAL ---
 function playBillboardMovie() {
@@ -1765,7 +1791,7 @@ async function openMovieDetails(movie) {
   modalRating.textContent = `★ ${movie.rating || '8.8'} / 10`;
 
   modalEpisodesSection.style.display = 'none';
-  modalEditionsList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">Загрузка проверенных раздач с RuTracker...</div>';
+  modalEditionsList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">Загрузка проверенных раздач (4K, Full HD)...</div>';
   movieDetailModal.style.display = 'flex';
   checkActiveMovieDownloadStatus();
   updateModalFavButton();
@@ -1807,7 +1833,8 @@ function openMovieDetailsWithTorrents(movie, verified, allResults) {
   state.modalAllResults = allResults || [];
   modalBackdrop.src = movie.poster;
   modalTitle.textContent = movie.title;
-  modalMatch.textContent = `${movie.rating || '8.7'} IMDb`;
+  const matchEl = document.getElementById('modalMatch') || document.getElementById('modalRatingBadge');
+  if (matchEl) matchEl.textContent = `${movie.rating || '8.7'} IMDb`;
   modalYear.textContent = movie.year || '2024';
   modalAge.textContent = '16+';
   modalQuality.textContent = '4K UHD';
@@ -1976,11 +2003,15 @@ function playEpisodeFromModal(fileId) {
 
 function openTorrentReleaseModal(item) {
   state.activeMovie = item;
+  state.modalTorrentItem = item;
+  state.modalVerified = [item];
+  state.modalAllResults = [item];
   const modalImg = item.backdrop || item.poster || 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1280&q=80';
   modalBackdrop.onerror = () => { modalBackdrop.src = generateCardSvg(item.display_title || item.title, item.display_year || item.date || '2024', item.quality || 'HD'); };
   modalBackdrop.src = modalImg;
   modalTitle.textContent = item.display_title || item.title;
-  modalMatch.textContent = `▲ ${item.seeds} сидов`;
+  const matchEl = document.getElementById('modalMatch') || document.getElementById('modalRatingBadge');
+  if (matchEl) matchEl.textContent = `▲ ${item.seeds} сидов`;
   modalYear.textContent = item.display_year || item.date || '2024';
   modalAge.textContent = '16+';
   modalQuality.textContent = item.quality || 'HD';
@@ -1991,6 +2022,9 @@ function openTorrentReleaseModal(item) {
 
   modalEpisodesSection.style.display = 'none';
   movieDetailModal.style.display = 'flex';
+  checkActiveMovieDownloadStatus();
+  updateModalFavButton();
+  startDownloadsPolling();
 
   // Single release edition
   renderModalEditions([{
@@ -2010,6 +2044,8 @@ function openTorrentReleaseModal(item) {
   const isSeries = item.is_series || item.title.toLowerCase().includes('сезон') || item.title.toLowerCase().includes('сери') || item.title.toLowerCase().includes('s0');
   if (isSeries) {
     loadEpisodesForModal(item, item);
+  } else {
+    preloadStream(item);
   }
 }
 

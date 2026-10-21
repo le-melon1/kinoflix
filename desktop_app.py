@@ -39,12 +39,16 @@ def start_backend():
     cmd = [python_exe, "-m", "uvicorn", "backend.main:app", "--host", HOST, "--port", str(PORT)]
     
     print("Starting KinoFlix backend server...")
+    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    log_path = os.path.join(base_dir, "backend.log")
     try:
+        log_file = open(log_path, "a", encoding="utf-8")
         _server_process = subprocess.Popen(
             cmd,
             cwd=base_dir,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            creationflags=creationflags,
+            stdout=log_file,
+            stderr=subprocess.STDOUT
         )
     except Exception as e:
         print(f"Failed to start backend: {e}")
@@ -73,20 +77,34 @@ def main():
     # Start backend server in background
     start_backend()
 
-    # Create native application window
-    window = webview.create_window(
-        title="KinoFlix",
-        url=BASE_URL,
-        width=1280,
-        height=820,
-        min_size=(960, 600),
-        background_color="#141414",
-        text_select=False,
-        confirm_close=False
-    )
-
     try:
-        webview.start(debug=False)
+        use_webview = "--webview" in sys.argv or (sys.platform == "darwin" and "--browser" not in sys.argv)
+        if use_webview:
+            try:
+                window = webview.create_window(
+                    title="KinoFlix",
+                    url=BASE_URL,
+                    width=1280,
+                    height=820,
+                    min_size=(960, 600),
+                    background_color="#141414",
+                    text_select=False,
+                    confirm_close=False
+                )
+                webview.start(debug=False)
+                return
+            except Exception as e:
+                print(f"WebView unavailable ({e}). Falling back to default browser...")
+
+        import webbrowser
+        print(f"Opening KinoFlix in default browser at {BASE_URL}...")
+        webbrowser.open(BASE_URL)
+        print(f"KinoFlix is running at {BASE_URL}")
+        try:
+            while True:
+                time.sleep(1)
+        except (KeyboardInterrupt, SystemExit):
+            pass
     finally:
         cleanup()
 
