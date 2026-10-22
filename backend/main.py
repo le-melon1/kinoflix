@@ -16,7 +16,7 @@ from backend.rutracker import rutracker_client
 from backend.torrserver import torrserver_mgr
 from backend.settings import settings_mgr
 
-app = FastAPI(title="KinoFlix - Instant Torrent Cinema")
+app = FastAPI(title="KinoFlix - Instant Torrent Cinema", version="3.2.0")
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
 
