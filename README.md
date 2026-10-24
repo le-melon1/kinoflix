@@ -1,6 +1,7 @@
 # 🎬 KinoFlix v3.2 — Мгновенный потоковый кинотеатр
 
-[![Release](https://img.shields.io/badge/release-v3.2.0-E50914?style=for-the-badge&logo=netflix&logoColor=white)](https://github.com/le-melon1/kinoflix/releases)
+[![Release](https://img.shields.io/badge/release-v3.2.1-E50914?style=for-the-badge&logo=netflix&logoColor=white)](https://github.com/le-melon1/kinoflix/releases/latest)
+[![Download Windows](https://img.shields.io/badge/Download-Windows%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/le-melon1/kinoflix/releases/download/v3.2.1/KinoFlix-Windows-x64.zip)
 [![Platform](https://img.shields.io/badge/platform-macOS%20|%20Windows%20|%20iOS%20|%20Android-blue?style=for-the-badge)](https://github.com/le-melon1/kinoflix)
 [![Python](https://img.shields.io/badge/python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -12,12 +13,20 @@
 
 ---
 
+## 📥 Скачать приложение для Windows
+
+* 📦 **[Скачать KinoFlix для Windows (64-bit ZIP)](https://github.com/le-melon1/kinoflix/releases/download/v3.2.1/KinoFlix-Windows-x64.zip)** — полная готовая сборка со всеми библиотеками и движком (распакуйте архив и запустите `KinoFlix.exe`).
+* ⚡ **[Прямой файл KinoFlix.exe](https://github.com/le-melon1/kinoflix/releases/download/v3.2.1/KinoFlix.exe)**.
+* 🌐 **[Страница релиза v3.2.1 на GitHub](https://github.com/le-melon1/kinoflix/releases/tag/v3.2.1)**.
+
+---
+
 ## 🌟 Ключевые возможности
 
 ### 📱 Кроссплатформенные приложения
 * **iOS / Android (PWA):** Моментальная установка в один клик прямо из мобильного браузера (Safari / Chrome) без сторонних магазинов. Работает в полноэкранном режиме с собственной иконкой, splash-экраном и мобильной нижней панелью навигации.
 * **macOS Standalone App:** Нативное приложение `.app` с иконкой высокого разрешения в Dock, поддержкой жестов и плавным окном воспроизведения (`dist/KinoFlix.app`).
-* **Windows Standalone App:** Готовый переносимый `.exe` лаунчер для Windows (`dist/KinoFlix/KinoFlix.exe`).
+* **Windows Standalone App:** Нативный рабочий стол для Windows: **[Скачать KinoFlix-Windows-x64.zip](https://github.com/le-melon1/kinoflix/releases/download/v3.2.1/KinoFlix-Windows-x64.zip)**.
 
 ### ⚡ Потоковый движок нового поколения
 * **Работа без VPN:** Интеллектуальный механизм адаптивного обхода блокировок и прямого сокет-соединения для трекеров и P2P-пиров.
