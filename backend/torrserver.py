@@ -18,13 +18,22 @@ else:
 
 BIN_DIR = os.path.join(BASE_DIR, "bin")
 
+if sys.platform == "win32":
+    appdata = os.environ.get("APPDATA") or os.path.expanduser("~")
+    TORRSERVER_DIR = os.path.join(appdata, "KinoFlix", "torrserver")
+else:
+    TORRSERVER_DIR = os.path.expanduser("~/.config/kinoflix/torrserver")
+
 def get_torrserver_bin() -> str:
     if sys.platform == "win32":
         for name in ("TorrServer.exe", "TorrServer-windows-amd64.exe", "TorrServer"):
             candidate = os.path.join(BIN_DIR, name)
             if os.path.exists(candidate):
                 return candidate
-        return os.path.join(BIN_DIR, "TorrServer.exe")
+            cand2 = os.path.join(TORRSERVER_DIR, name)
+            if os.path.exists(cand2):
+                return cand2
+        return os.path.join(TORRSERVER_DIR, "TorrServer.exe")
     else:
         return os.path.join(BIN_DIR, "TorrServer")
 
@@ -33,18 +42,13 @@ BIND_DIRECT_DYLIB = os.path.join(BIN_DIR, "bind_direct.dylib")
 TORRSERVER_PORT = 8090
 TORRSERVER_URL = f"http://127.0.0.1:{TORRSERVER_PORT}"
 
-if sys.platform == "win32":
-    appdata = os.environ.get("APPDATA") or os.path.expanduser("~")
-    TORRSERVER_DIR = os.path.join(appdata, "KinoFlix", "torrserver")
-else:
-    TORRSERVER_DIR = os.path.expanduser("~/.config/kinoflix/torrserver")
-
 def ensure_torrserver_installed() -> str:
     bin_path = get_torrserver_bin()
     if os.path.exists(bin_path):
         return bin_path
     
-    os.makedirs(BIN_DIR, exist_ok=True)
+    target_dir = os.path.dirname(bin_path)
+    os.makedirs(target_dir, exist_ok=True)
     if sys.platform == "win32":
         url = "https://github.com/YouROK/TorrServer/releases/latest/download/TorrServer-windows-amd64.exe"
         print(f"Downloading TorrServer for Windows from {url}...")

@@ -24,7 +24,6 @@ python -m PyInstaller --clean -y KinoFlix.spec
 
 echo.
 echo ==========================================
-echo  Build complete!
-echo  Application is located at: dist\KinoFlix\KinoFlix.exe
+echo  Application is located at: dist\KinoFlix.exe
 echo ==========================================
 pause

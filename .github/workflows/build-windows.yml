@@ -49,8 +49,14 @@ jobs:
       - name: Package Windows Release (ZIP)
         shell: pwsh
         run: |
-          Compress-Archive -Path "dist\KinoFlix\*" -DestinationPath "KinoFlix-Windows-x64.zip" -Force
-          Copy-Item "dist\KinoFlix\KinoFlix.exe" -Destination "KinoFlix.exe"
+          if (Test-Path "dist\KinoFlix.exe") {
+            Copy-Item "dist\KinoFlix.exe" -Destination "KinoFlix.exe"
+            Compress-Archive -Path "KinoFlix.exe" -DestinationPath "KinoFlix-Windows-x64.zip" -Force
+          } elseif (Test-Path "dist\KinoFlix\KinoFlix.exe") {
+            Copy-Item "dist\KinoFlix\KinoFlix.exe" -Destination "KinoFlix.exe"
+            Compress-Archive -Path "dist\KinoFlix\*" -DestinationPath "KinoFlix-Windows-x64.zip" -Force
+          }
+          Write-Host "KinoFlix.exe size: $((Get-Item KinoFlix.exe).Length) bytes"
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
@@ -58,7 +64,7 @@ jobs:
           name: KinoFlix-Windows-x64
           path: |
             KinoFlix-Windows-x64.zip
-            dist/KinoFlix/KinoFlix.exe
+            KinoFlix.exe
 
       - name: Determine Release Tag
         id: vars
@@ -67,7 +73,7 @@ jobs:
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           else
-            echo "TAG_NAME=v3.2.1" >> $GITHUB_OUTPUT
+            echo "TAG_NAME=v3.2.2" >> $GITHUB_OUTPUT
           fi
 
       - name: Publish GitHub Release
