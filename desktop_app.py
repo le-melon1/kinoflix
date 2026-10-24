@@ -8,7 +8,7 @@ import sys
 import time
 import socket
 import subprocess
-import threading
+import multiprocessing
 import webview
 
 PORT = 7890
@@ -16,12 +16,16 @@ HOST = "127.0.0.1"
 BASE_URL = f"http://{HOST}:{PORT}"
 
 _server_process = None
-_torrserver_process = None
 
 def is_port_open(host, port):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.5)
         return s.connect_ex((host, port)) == 0
+
+def run_frozen_backend():
+    import uvicorn
+    from backend.main import app
+    uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
 
 def start_backend():
     global _server_process
@@ -29,25 +33,23 @@ def start_backend():
         print(f"Backend already running on {BASE_URL}")
         return
 
-    # Determine base directory
+    print("Starting KinoFlix backend server...")
     if getattr(sys, "frozen", False):
-        base_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+        _server_process = multiprocessing.Process(target=run_frozen_backend, daemon=True)
+        _server_process.start()
     else:
         base_dir = os.path.dirname(os.path.abspath(__file__))
-
-    python_exe = sys.executable
-    cmd = [python_exe, "-m", "uvicorn", "backend.main:app", "--host", HOST, "--port", str(PORT)]
-    
-    print("Starting KinoFlix backend server...")
-    try:
-        _server_process = subprocess.Popen(
-            cmd,
-            cwd=base_dir,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-    except Exception as e:
-        print(f"Failed to start backend: {e}")
+        python_exe = sys.executable
+        cmd = [python_exe, "-m", "uvicorn", "backend.main:app", "--host", HOST, "--port", str(PORT)]
+        try:
+            _server_process = subprocess.Popen(
+                cmd,
+                cwd=base_dir,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+        except Exception as e:
+            print(f"Failed to start backend: {e}")
 
     # Wait for server to become responsive
     for _ in range(30):
@@ -62,12 +64,9 @@ def cleanup():
         print("Stopping KinoFlix backend...")
         try:
             _server_process.terminate()
-            _server_process.wait(timeout=2)
         except Exception:
-            try:
-                _server_process.kill()
-            except Exception:
-                pass
+            pass
+        _server_process = None
 
 def main():
     # Start backend server in background
@@ -91,4 +90,5 @@ def main():
         cleanup()
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     main()

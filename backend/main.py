@@ -73,8 +73,8 @@ class SpeedLimitRequest(BaseModel):
 
 @app.on_event("startup")
 async def startup_event():
-    # Warm up TorrServer, apply persistent settings and check rutracker session
-    torrserver_mgr.start()
+    # Warm up TorrServer in background thread, apply persistent settings and check rutracker session
+    await asyncio.to_thread(torrserver_mgr.start)
     try:
         settings_mgr._apply_side_effects()
     except Exception:

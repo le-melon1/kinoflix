@@ -28,9 +28,15 @@ a = Analysis(
         'uvicorn.lifespan',
         'uvicorn.lifespan.on',
         'fastapi',
+        'fastapi.staticfiles',
+        'fastapi.responses',
         'starlette',
         'pydantic',
-        'webview'
+        'webview',
+        'httpx',
+        'bs4',
+        'requests',
+        'multiprocessing'
     ],
     hookspath=[],
     hooksconfig={},

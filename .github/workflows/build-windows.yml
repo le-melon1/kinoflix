@@ -1,0 +1,86 @@
+name: Build and Release Windows App
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows Application
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pywebview pyinstaller pillow
+
+      - name: Download TorrServer for Windows
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path bin
+          Invoke-WebRequest -Uri "https://github.com/YouROK/TorrServer/releases/latest/download/TorrServer-windows-amd64.exe" -OutFile "bin/TorrServer.exe"
+          Write-Host "TorrServer.exe downloaded successfully. Size: $((Get-Item bin/TorrServer.exe).Length) bytes"
+
+      - name: Generate App Icons
+        run: |
+          python generate_icons.py
+
+      - name: Build with PyInstaller
+        run: |
+          python -m PyInstaller --clean -y KinoFlix.spec
+
+      - name: Package Windows Release (ZIP)
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist\KinoFlix\*" -DestinationPath "KinoFlix-Windows-x64.zip" -Force
+          Copy-Item "dist\KinoFlix\KinoFlix.exe" -Destination "KinoFlix.exe"
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: KinoFlix-Windows-x64
+          path: |
+            KinoFlix-Windows-x64.zip
+            dist/KinoFlix/KinoFlix.exe
+
+      - name: Determine Release Tag
+        id: vars
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            echo "TAG_NAME=v3.2.1" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
+        with:
+          tag_name: ${{ steps.vars.outputs.TAG_NAME }}
+          name: KinoFlix ${{ steps.vars.outputs.TAG_NAME }} (Windows & Web)
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            KinoFlix-Windows-x64.zip
+            KinoFlix.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
