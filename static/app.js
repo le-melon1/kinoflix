@@ -189,29 +189,68 @@ function escapeXml(unsafe) {
     .replace(/'/g, '&apos;');
 }
 
+function sanitizeImgUrl(url) {
+  if (!url) return '';
+  if (url.includes('wsrv.nl')) return url;
+  if (url.includes('image.tmdb.org')) {
+    const clean = url.replace(/^https?:\/\//, '');
+    return `https://wsrv.nl/?url=${encodeURIComponent(clean)}`;
+  }
+  return url;
+}
+
+function handleCardImgError(img) {
+  if (!img || img._fallbackApplied) return;
+  img._fallbackApplied = true;
+  img.onerror = null;
+  const title = img.getAttribute('data-title') || 'KinoFlix';
+  const year = img.getAttribute('data-year') || '2024';
+  const quality = img.getAttribute('data-quality') || 'HD';
+  img.src = generateCardSvg(title, year, quality);
+}
+
+function registerCatalogItem(item) {
+  if (!item) return '';
+  state.catalogItemsMap = state.catalogItemsMap || {};
+  const id = item.id || item.title || ('item_' + Math.random().toString(36).substr(2, 9));
+  item.id = id;
+  state.catalogItemsMap[id] = item;
+  return id;
+}
+
 function generateCardSvg(title, year, quality) {
-  const t = escapeXml((title || 'KinoFlix').slice(0, 24));
+  const t = escapeXml((title || 'KinoFlix').slice(0, 32));
   const y = escapeXml(year || '2024');
-  const q = escapeXml(quality || 'HD');
+  const q = escapeXml(quality || '4K UHD');
+  let hash = 0;
+  for (let i = 0; i < t.length; i++) hash = t.charCodeAt(i) + ((hash << 5) - hash);
+  const hues = [
+    ['#1e1b4b', '#312e81', '#0f172a'],
+    ['#3b0764', '#581c87', '#18181b'],
+    ['#450a0a', '#7f1d1d', '#18181b'],
+    ['#064e3b', '#065f46', '#0f172a'],
+    ['#172554', '#1e3a8a', '#030712']
+  ];
+  const h = hues[Math.abs(hash) % hues.length];
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="170" viewBox="0 0 300 170">
     <defs>
-      <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="#1f1f1f"/>
-        <stop offset="50%" stop-color="#141414"/>
-        <stop offset="100%" stop-color="#0a0a0a"/>
+      <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="${h[0]}"/>
+        <stop offset="50%" stop-color="${h[1]}"/>
+        <stop offset="100%" stop-color="${h[2]}"/>
       </linearGradient>
-      <linearGradient id="redG" x1="0%" y1="0%" x2="100%" y2="0%">
+      <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="0%">
         <stop offset="0%" stop-color="#E50914"/>
         <stop offset="100%" stop-color="#B20710"/>
       </linearGradient>
     </defs>
-    <rect width="300" height="170" fill="url(#g)"/>
-    <circle cx="150" cy="70" r="30" fill="#222" stroke="#333" stroke-width="2"/>
-    <polygon points="145,58 162,70 145,82" fill="#E50914"/>
-    <rect x="14" y="14" width="46" height="18" rx="3" fill="url(#redG)"/>
-    <text x="37" y="27" fill="#ffffff" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="10" font-weight="bold" text-anchor="middle">${q}</text>
-    <text x="150" y="125" fill="#ffffff" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="13" font-weight="bold" text-anchor="middle">${t}</text>
-    <text x="150" y="145" fill="#888888" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="11" text-anchor="middle">${y} • KinoFlix</text>
+    <rect width="300" height="170" fill="url(#bg)"/>
+    <circle cx="150" cy="58" r="26" fill="rgba(0,0,0,0.5)" stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/>
+    <polygon points="144,48 160,58 144,68" fill="#E50914"/>
+    <rect x="14" y="14" width="56" height="20" rx="4" fill="url(#glow)"/>
+    <text x="42" y="28" fill="#ffffff" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="10" font-weight="900" text-anchor="middle" letter-spacing="0.5">${q}</text>
+    <text x="150" y="116" fill="#ffffff" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="14" font-weight="800" text-anchor="middle">${t}</text>
+    <text x="150" y="138" fill="rgba(255,255,255,0.7)" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="11" font-weight="600" text-anchor="middle">★ 8.5 • ${y} • KinoFlix</text>
   </svg>`;
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
@@ -453,13 +492,14 @@ function renderContinueWatching() {
   if (badge) badge.textContent = list.length;
 
   continueWatchingGrid.innerHTML = list.map(cw => {
-    const thumb = cw.backdrop || cw.poster || generateCardSvg(cw.title, '', 'HD');
+    const cwId = registerCatalogItem(cw);
+    const thumb = sanitizeImgUrl(cw.backdrop || cw.poster) || generateCardSvg(cw.title, '', 'HD');
     const remainingMin = Math.max(1, Math.round((cw.duration - cw.currentTime) / 60));
     return `
-      <div class="cw-card" onclick="resumeContinueWatching(${JSON.stringify(cw).replace(/"/g, '&quot;')})">
-        <button class="cw-dismiss-btn" onclick="dismissContinueWatching('${escapeJs(cw.id)}', event)" title="Удалить из списка">✕</button>
+      <div class="cw-card" onclick="resumeContinueWatching('${escapeJs(cwId)}')">
+        <button class="cw-dismiss-btn" onclick="dismissContinueWatching('${escapeJs(cw.id || cwId)}', event)" title="Удалить из списка">✕</button>
         <div class="cw-thumb-box">
-          <img src="${thumb}" alt="${escapeHtml(cw.title)}" class="cw-thumb-img" onerror="this.onerror=null; this.src=generateCardSvg('${escapeJs(cw.title)}', '', 'HD');">
+          <img src="${thumb}" alt="${escapeHtml(cw.title)}" class="cw-thumb-img" data-title="${escapeHtml(cw.title)}" data-year="" data-quality="HD" onerror="handleCardImgError(this);">
           <div class="cw-play-overlay">
             <div class="cw-play-icon">▶</div>
           </div>
@@ -479,7 +519,11 @@ function renderContinueWatching() {
   }).join('');
 }
 
-function resumeContinueWatching(cw) {
+function resumeContinueWatching(cwOrId) {
+  let cw = cwOrId;
+  if (typeof cwOrId === 'string') {
+    cw = (state.catalogItemsMap && state.catalogItemsMap[cwOrId]) || (state.continueWatching || []).find(c => c.id === cwOrId);
+  }
   if (!cw || !cw.item) return;
   showToast(`Возобновление с ${formatTime(cw.currentTime)}`, 'info');
   startNetflixStream(cw.item, cw.fileId, cw.currentTime);
@@ -650,6 +694,7 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').then((reg) => {
       console.log('PWA ServiceWorker registered:', reg.scope);
+      reg.update();
     }).catch((err) => {
       console.log('PWA ServiceWorker registration error:', err);
     });
@@ -735,17 +780,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const savedTv = localStorage.getItem('kinoflix_tv_mode') === 'true';
   if (savedTv) {
     setTvMode(true);
-  }
-
-  if (netflixSearchInput) {
-    netflixSearchInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        clearTimeout(state.searchTimeout);
-        const q = netflixSearchInput.value.trim();
-        if (q) performSearch(q);
-      }
-    });
   }
 
   window.addEventListener('beforeunload', () => {
@@ -845,28 +879,30 @@ function renderTvTabs(genres) {
 
 function renderBillboard(item) {
   state.billboardMovie = item;
+  registerCatalogItem(item);
   billboardImg.onerror = () => { billboardImg.src = generateCardSvg(item.title, item.year, item.quality); };
-  billboardImg.src = item.backdrop;
-  billboardTitle.textContent = item.title.toUpperCase();
+  billboardImg.src = sanitizeImgUrl(item.backdrop);
+  billboardTitle.textContent = (item.title || '').toUpperCase();
   if (billboardRating) billboardRating.textContent = '★ ' + (item.rating || '8.8');
   billboardYear.textContent = item.year || '2024';
   billboardAge.textContent = item.age || '16+';
   billboardDuration.textContent = item.duration || '2 ч 15 мин';
   billboardQuality.textContent = item.quality || 'Ultra HD 4K';
   billboardAudio.textContent = item.audio ? '5.1' : 'Стерео';
-  billboardPlot.textContent = item.plot;
+  billboardPlot.textContent = item.plot || '';
   updateBillboardFavButton();
 }
 
 function renderCardHtml(item) {
-  const cardImg = item.backdrop || item.poster || generateCardSvg(item.title, item.year, item.quality);
+  const itemId = registerCatalogItem(item);
+  const cardImg = sanitizeImgUrl(item.backdrop || item.poster) || generateCardSvg(item.title, item.year, item.quality);
   const fav = isFavorite(item.id || item.title);
   return `
-    <div class="netflix-card" onclick="openMovieDetails(${JSON.stringify(item).replace(/"/g, '&quot;')})">
-      <button class="card-fav-btn ${fav ? 'active' : ''}" onclick="event.stopPropagation(); toggleFavoriteItem(${JSON.stringify(item).replace(/"/g, '&quot;')})" title="${fav ? 'Удалить из списка' : 'В Мой список'}">
+    <div class="netflix-card" onclick="openMovieDetails('${escapeJs(itemId)}')">
+      <button class="card-fav-btn ${fav ? 'active' : ''}" onclick="event.stopPropagation(); toggleFavoriteItem(state.catalogItemsMap['${escapeJs(itemId)}'])" title="${fav ? 'Удалить из списка' : 'В Мой список'}">
         ${fav ? '★' : '＋'}
       </button>
-      <img src="${cardImg}" alt="${escapeHtml(item.title)}" class="card-backdrop-img" onerror="this.onerror=null; this.src=generateCardSvg('${escapeJs(item.title)}', '${item.year || ''}', '${item.quality || 'HD'}');">
+      <img src="${cardImg}" alt="${escapeHtml(item.title)}" class="card-backdrop-img" data-title="${escapeHtml(item.title)}" data-year="${escapeHtml(item.year || '')}" data-quality="${escapeHtml(item.quality || 'HD')}" onerror="handleCardImgError(this);">
       <div class="card-overlay-hover">
         <div class="card-title-mini">${escapeHtml(item.title)}</div>
         <div class="card-meta-mini">
@@ -934,15 +970,18 @@ function renderRows(categories) {
           <div class="row-carousel-wrapper">
             <button class="row-arrow row-arrow-prev" onclick="scrollCarouselRow('${cat.id}', -1)" title="Предыдущие">‹</button>
             <div class="row-carousel" id="carousel_${cat.id}">
-              ${cat.items.map((item, idx) => `
-                <div class="top10-card" onclick="openMovieDetails(${JSON.stringify(item).replace(/"/g, '&quot;')})">
+              ${cat.items.map((item, idx) => {
+                const itemId = registerCatalogItem(item);
+                const posterImg = sanitizeImgUrl(item.poster) || generateCardSvg(item.title, item.year, item.quality);
+                return `
+                <div class="top10-card" onclick="openMovieDetails('${escapeJs(itemId)}')">
                   <div class="top10-number">${idx + 1}</div>
                   <div class="top10-poster-wrap">
-                    <img src="${item.poster}" alt="${escapeHtml(item.title)}" onerror="this.onerror=null; this.src=generateCardSvg('${escapeJs(item.title)}', '${item.year || ''}', '${item.quality || '4K'}');">
+                    <img src="${posterImg}" alt="${escapeHtml(item.title)}" data-title="${escapeHtml(item.title)}" data-year="${escapeHtml(item.year || '')}" data-quality="${escapeHtml(item.quality || '4K')}" onerror="handleCardImgError(this);">
                     <div class="top10-title-bar">${escapeHtml(item.title)}</div>
                   </div>
                 </div>
-              `).join('')}
+              `;}).join('')}
             </div>
             <button class="row-arrow row-arrow-next" onclick="scrollCarouselRow('${cat.id}', 1)" title="Следующие">›</button>
           </div>
@@ -1487,16 +1526,17 @@ function setViewMode(mode) {
 }
 
 function renderCanvasCardHtml(item) {
-  const cardImg = item.backdrop || item.poster || generateCardSvg(item.title, item.year, item.quality);
+  const itemId = registerCatalogItem(item);
+  const cardImg = sanitizeImgUrl(item.backdrop || item.poster) || generateCardSvg(item.title, item.year, item.quality);
   const cardYear = item.year || item.display_year || '';
   const fav = isFavorite(item.id || item.title);
   return `
-    <div class="grid-card canvas-card" onclick="openMovieDetails(${JSON.stringify(item).replace(/"/g, '&quot;')})">
-      <button class="card-fav-btn ${fav ? 'active' : ''}" style="top: 8px; left: 8px;" onclick="event.stopPropagation(); toggleFavoriteItem(${JSON.stringify(item).replace(/"/g, '&quot;')})" title="${fav ? 'Удалить из списка' : 'В Мой список'}">
+    <div class="grid-card canvas-card" onclick="openMovieDetails('${escapeJs(itemId)}')">
+      <button class="card-fav-btn ${fav ? 'active' : ''}" style="top: 8px; left: 8px;" onclick="event.stopPropagation(); toggleFavoriteItem(state.catalogItemsMap['${escapeJs(itemId)}'])" title="${fav ? 'Удалить из списка' : 'В Мой список'}">
         ${fav ? '★' : '＋'}
       </button>
       <div class="grid-card-poster-wrap">
-        <img src="${cardImg}" class="grid-card-poster-img" alt="${escapeHtml(item.title)}" onerror="this.onerror=null; this.src=generateCardSvg('${escapeJs(item.title)}', '${escapeJs(cardYear)}', '${escapeJs(item.quality || 'HD')}');">
+        <img src="${cardImg}" class="grid-card-poster-img" alt="${escapeHtml(item.title)}" data-title="${escapeHtml(item.title)}" data-year="${escapeHtml(cardYear)}" data-quality="${escapeHtml(item.quality || 'HD')}" onerror="handleCardImgError(this);">
         <div class="grid-card-hover-overlay">
           <div class="grid-play-icon">▶</div>
         </div>
@@ -1676,10 +1716,7 @@ function switchCategory(cat) {
   updateCardFavoriteButtons();
 }
 
-let _currentSearchSeq = 0;
-
 async function performSearch(query) {
-  const thisSeq = ++_currentSearchSeq;
   homeView.style.display = 'none';
   searchResultsView.style.display = 'block';
   searchQueryLabel.textContent = `"${query}"`;
@@ -1689,12 +1726,10 @@ async function performSearch(query) {
   try {
     const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&source=${state.currentSource}`);
     const data = await res.json();
-    if (thisSeq !== _currentSearchSeq) return; // Discard stale out-of-order response
     searchLoader.style.display = 'none';
 
     renderSearchResults(data);
   } catch (err) {
-    if (thisSeq !== _currentSearchSeq) return;
     searchLoader.style.display = 'none';
     searchGrid.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding: 40px; color:#888;">Ошибка поиска: ${err.message}</div>`;
   }
@@ -1720,18 +1755,17 @@ function renderSearchResults(data) {
     return;
   }
 
-  state.currentSearchResults = results;
-
   // Render individual release cards with distinct covers and always-visible titles
-  let html = results.map((item, idx) => {
+  let html = results.map(item => {
+    const itemId = registerCatalogItem(item);
     const cardTitle = item.display_title || item.title;
     const cardYear = item.display_year || item.year || '';
     // Prefer widescreen 16:9 backdrop so there is zero cropping on landscape cards
-    const cardImg = item.backdrop || item.poster || generateCardSvg(cardTitle, cardYear, item.quality || 'HD');
+    const cardImg = sanitizeImgUrl(item.backdrop || item.poster) || generateCardSvg(cardTitle, cardYear, item.quality || 'HD');
     return `
-      <div class="grid-card" onclick="openTorrentReleaseModalByIndex(${idx})">
+      <div class="grid-card" onclick="openTorrentReleaseModal('${escapeJs(itemId)}')">
         <div class="grid-card-poster-wrap">
-          <img src="${cardImg}" class="grid-card-poster-img" alt="${escapeHtml(cardTitle)}" onerror="this.onerror=null; this.src=generateCardSvg('${escapeJs(cardTitle)}', '${escapeJs(cardYear)}', '${escapeJs(item.quality || 'HD')}');">
+          <img src="${cardImg}" class="grid-card-poster-img" alt="${escapeHtml(cardTitle)}" data-title="${escapeHtml(cardTitle)}" data-year="${escapeHtml(cardYear)}" data-quality="${escapeHtml(item.quality || 'HD')}" onerror="handleCardImgError(this);">
           <div class="grid-card-hover-overlay">
             <div class="grid-play-icon">▶</div>
           </div>
@@ -1755,18 +1789,25 @@ function renderSearchResults(data) {
   searchGrid.innerHTML = html;
 }
 
-function openTorrentReleaseModalByIndex(idx) {
-  const item = state.currentSearchResults && state.currentSearchResults[idx];
-  if (item) {
-    openTorrentReleaseModal(item);
-  }
-}
-window.openTorrentReleaseModalByIndex = openTorrentReleaseModalByIndex;
-
 // --- NETFLIX DETAIL & EDITIONS MODAL ---
+async function startDirectMoviePlayback(movie) {
+  if (!movie) return;
+  closeDetailModal();
+  if (state.preloadedTorrentItem && (state.preloadedTorrentItem.title === movie.title || state.preloadedTorrentItem.id === movie.id || (movie.magnet && state.preloadedTorrentItem.magnet === movie.magnet))) {
+    return startNetflixStream(state.preloadedTorrentItem);
+  }
+  if (state.modalVerified && state.modalVerified.length > 0 && state.activeMovie && (state.activeMovie.title === movie.title || state.activeMovie.id === movie.id)) {
+    return startNetflixStream(state.modalVerified[0]);
+  }
+  if (state.modalAllResults && state.modalAllResults.length > 0 && state.activeMovie && (state.activeMovie.title === movie.title || state.activeMovie.id === movie.id)) {
+    return startNetflixStream(state.modalAllResults[0]);
+  }
+  return startNetflixStream(movie);
+}
+
 function playBillboardMovie() {
   if (state.billboardMovie) {
-    openMovieDetails(state.billboardMovie);
+    startDirectMoviePlayback(state.billboardMovie);
   }
 }
 
@@ -1776,11 +1817,17 @@ function openBillboardDetails() {
   }
 }
 
-async function openMovieDetails(movie) {
+async function openMovieDetails(movieOrId) {
+  state.autoPlayWhenReady = false;
+  let movie = movieOrId;
+  if (typeof movieOrId === 'string') {
+    movie = (state.catalogItemsMap && state.catalogItemsMap[movieOrId]) || { title: movieOrId };
+  }
+  if (!movie) return;
   state.activeMovie = movie;
   modalBackdrop.onerror = () => { modalBackdrop.src = generateCardSvg(movie.title, movie.year, movie.quality); };
-  modalBackdrop.src = movie.backdrop || movie.poster;
-  modalTitle.textContent = movie.title;
+  modalBackdrop.src = sanitizeImgUrl(movie.backdrop || movie.poster);
+  modalTitle.textContent = movie.title || '';
   if (modalRatingBadge) modalRatingBadge.textContent = '★ ' + (movie.rating || '8.8');
   modalYear.textContent = movie.year || '2024';
   modalAge.textContent = movie.age || '16+';
@@ -1791,7 +1838,7 @@ async function openMovieDetails(movie) {
   modalRating.textContent = `★ ${movie.rating || '8.8'} / 10`;
 
   modalEpisodesSection.style.display = 'none';
-  modalEditionsList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">Загрузка проверенных раздач (4K, Full HD)...</div>';
+  modalEditionsList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">Загрузка проверенных раздач с RuTracker...</div>';
   movieDetailModal.style.display = 'flex';
   checkActiveMovieDownloadStatus();
   updateModalFavButton();
@@ -1831,10 +1878,9 @@ function openMovieDetailsWithTorrents(movie, verified, allResults) {
   state.activeMovie = movie;
   state.modalVerified = verified || [];
   state.modalAllResults = allResults || [];
-  modalBackdrop.src = movie.poster;
+  modalBackdrop.src = sanitizeImgUrl(movie.poster || movie.backdrop);
   modalTitle.textContent = movie.title;
-  const matchEl = document.getElementById('modalMatch') || document.getElementById('modalRatingBadge');
-  if (matchEl) matchEl.textContent = `${movie.rating || '8.7'} IMDb`;
+  if (modalRatingBadge) modalRatingBadge.textContent = `${movie.rating || '8.7'} IMDb`;
   modalYear.textContent = movie.year || '2024';
   modalAge.textContent = '16+';
   modalQuality.textContent = '4K UHD';
@@ -2001,24 +2047,31 @@ function playEpisodeFromModal(fileId) {
   }
 }
 
-function openTorrentReleaseModal(item) {
+function openTorrentReleaseModal(itemOrId) {
+  let item = itemOrId;
+  if (typeof itemOrId === 'string') {
+    item = (state.catalogItemsMap && state.catalogItemsMap[itemOrId]) || { title: itemOrId };
+  }
+  if (!item) return;
+
   state.activeMovie = item;
-  state.modalTorrentItem = item;
-  state.modalVerified = [item];
+  state.autoPlayWhenReady = false;
+  state.modalVerified = [];
   state.modalAllResults = [item];
-  const modalImg = item.backdrop || item.poster || 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1280&q=80';
+  state.preloadedTorrentItem = null;
+  state.preloadedStreamData = null;
+  const modalImg = sanitizeImgUrl(item.backdrop || item.poster) || 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1280&q=80';
   modalBackdrop.onerror = () => { modalBackdrop.src = generateCardSvg(item.display_title || item.title, item.display_year || item.date || '2024', item.quality || 'HD'); };
   modalBackdrop.src = modalImg;
-  modalTitle.textContent = item.display_title || item.title;
-  const matchEl = document.getElementById('modalMatch') || document.getElementById('modalRatingBadge');
-  if (matchEl) matchEl.textContent = `▲ ${item.seeds} сидов`;
-  modalYear.textContent = item.display_year || item.date || '2024';
-  modalAge.textContent = '16+';
+  modalTitle.textContent = item.display_title || item.title || '';
+  if (modalRatingBadge) modalRatingBadge.textContent = item.rating ? `★ ${item.rating}` : `▲ ${item.seeds || 0} сидов`;
+  modalYear.textContent = item.display_year || item.date || item.year || '2024';
+  modalAge.textContent = item.age || '16+';
   modalQuality.textContent = item.quality || 'HD';
   modalAudio.textContent = item.audio || 'Русский звук';
-  modalPlot.textContent = item.overview || `Раздача от источника ${item.source}. Размер: ${item.size}. Количество сидеров: ${item.seeds}.`;
-  modalGenres.textContent = `Качество: ${item.quality} • Озвучка: ${item.audio}`;
-  modalRating.textContent = item.rating ? `★ ${item.rating} / 10` : `Размер: ${item.size}`;
+  modalPlot.textContent = item.overview || item.plot || `Раздача от источника ${item.source || 'Rutor'}. Размер: ${item.size || 'HD'}. Количество сидеров: ${item.seeds || 0}.`;
+  modalGenres.textContent = `Качество: ${item.quality || 'HD'} • Озвучка: ${item.audio || 'Дубляж'}`;
+  modalRating.textContent = item.rating ? `★ ${item.rating} / 10` : `Размер: ${item.size || 'HD'}`;
 
   modalEpisodesSection.style.display = 'none';
   movieDetailModal.style.display = 'flex';
@@ -2041,7 +2094,7 @@ function openTorrentReleaseModal(item) {
     topic_id: item.topic_id
   }], [item]);
 
-  const isSeries = item.is_series || item.title.toLowerCase().includes('сезон') || item.title.toLowerCase().includes('сери') || item.title.toLowerCase().includes('s0');
+  const isSeries = item.is_series || (item.title && (item.title.toLowerCase().includes('сезон') || item.title.toLowerCase().includes('сери') || item.title.toLowerCase().includes('s0')));
   if (isSeries) {
     loadEpisodesForModal(item, item);
   } else {
@@ -2050,6 +2103,8 @@ function openTorrentReleaseModal(item) {
 }
 
 function renderModalEditions(verifiedList, allList) {
+  state.modalVerified = verifiedList || [];
+  state.modalAllResults = allList || [];
   const list = (verifiedList && verifiedList.length) ? verifiedList.slice(0, 2) : (allList || []).slice(0, 2);
 
   if (!list.length) {
@@ -2071,6 +2126,7 @@ function renderModalEditions(verifiedList, allList) {
   }
 
   let html = list.map((item, idx) => {
+    const itemId = registerCatalogItem(item);
     let tagClass = 'tag-1080p-blue';
     const badge = item.curated_badge || '⭐ ПРОВЕРЕННЫЙ РЕЛИЗ';
     if (badge.includes('4K')) tagClass = 'tag-4k-gold';
@@ -2099,11 +2155,11 @@ function renderModalEditions(verifiedList, allList) {
 
         <div class="edition-actions" style="display:flex; gap:8px; align-items:center;">
           ${isSeriesItem ? `
-            <button class="n-secondary-btn" style="background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.25); color:#fff; padding:7px 14px; border-radius:4px; cursor:pointer; font-size:0.85rem;" onclick="loadEpisodesForModal(${JSON.stringify(item).replace(/"/g, '&quot;')}, state.activeMovie)">
+            <button class="n-secondary-btn" style="background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.25); color:#fff; padding:7px 14px; border-radius:4px; cursor:pointer; font-size:0.85rem;" onclick="loadEpisodesForModal(state.catalogItemsMap['${escapeJs(itemId)}'], state.activeMovie)">
               📑 Серии
             </button>
           ` : ''}
-          <button class="n-edition-play-btn" onclick="startNetflixStream(${JSON.stringify(item).replace(/"/g, '&quot;')})">
+          <button class="n-edition-play-btn" onclick="startNetflixStream(state.catalogItemsMap['${escapeJs(itemId)}'])">
             <span>▶ Смотреть</span>
           </button>
         </div>
@@ -2111,12 +2167,13 @@ function renderModalEditions(verifiedList, allList) {
     `;
   }).join('');
 
+  state.currentModalAllList = allList || [];
   // If there are more releases, add expandable button
   if (allList && allList.length > list.length) {
     const extraCount = allList.length - list.length;
     html += `
       <div id="moreEditionsWrap" style="text-align:center; padding: 12px 0;">
-        <button class="n-secondary-btn" style="background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); color:#ddd; padding:8px 20px; border-radius:4px; cursor:pointer;" onclick="showAllTorrentReleases(${JSON.stringify(allList).replace(/"/g, '&quot;')})">
+        <button class="n-secondary-btn" style="background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); color:#ddd; padding:8px 20px; border-radius:4px; cursor:pointer;" onclick="showAllTorrentReleases()">
           Показать все раздачи по сидам (+${extraCount})
         </button>
       </div>
@@ -2124,9 +2181,18 @@ function renderModalEditions(verifiedList, allList) {
   }
 
   modalEditionsList.innerHTML = html;
+
+  if (state.autoPlayWhenReady) {
+    state.autoPlayWhenReady = false;
+    const firstPlayBtn = modalEditionsList.querySelector('.n-edition-play-btn');
+    if (firstPlayBtn) {
+      firstPlayBtn.click();
+    }
+  }
 }
 
-function showAllTorrentReleases(allList) {
+function showAllTorrentReleases(passedList) {
+  const allList = passedList || state.currentModalAllList || [];
   const moreWrap = document.getElementById('moreEditionsWrap');
   if (moreWrap) moreWrap.remove();
 
@@ -2138,6 +2204,7 @@ function showAllTorrentReleases(allList) {
   }
 
   const extraHtml = allList.map(item => {
+    const itemId = registerCatalogItem(item);
     const isSeriesItem = item.is_series || item.season_label || (state.activeMovie && state.activeMovie.is_series);
     return `
       <div class="edition-item-card" style="border-left: 2px solid #444;">
@@ -2154,11 +2221,11 @@ function showAllTorrentReleases(allList) {
         </div>
         <div class="edition-actions" style="display:flex; gap:8px; align-items:center;">
           ${isSeriesItem ? `
-            <button class="n-secondary-btn" style="background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.25); color:#fff; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:0.8rem;" onclick="loadEpisodesForModal(${JSON.stringify(item).replace(/"/g, '&quot;')}, state.activeMovie)">
+            <button class="n-secondary-btn" style="background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.25); color:#fff; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:0.8rem;" onclick="loadEpisodesForModal(state.catalogItemsMap['${escapeJs(itemId)}'], state.activeMovie)">
               📑 Серии
             </button>
           ` : ''}
-          <button class="n-edition-play-btn" onclick="startNetflixStream(${JSON.stringify(item).replace(/"/g, '&quot;')})">
+          <button class="n-edition-play-btn" onclick="startNetflixStream(state.catalogItemsMap['${escapeJs(itemId)}'])">
             <span>▶ Смотреть</span>
           </button>
         </div>
@@ -2173,6 +2240,11 @@ function playSelectedMovie() {
   const firstPlayBtn = modalEditionsList.querySelector('.n-edition-play-btn');
   if (firstPlayBtn) {
     firstPlayBtn.click();
+    return;
+  }
+  if (state.activeMovie) {
+    state.autoPlayWhenReady = true;
+    startDirectMoviePlayback(state.activeMovie);
   }
 }
 
@@ -4061,13 +4133,13 @@ async function executeVoiceSearch(query) {
     if (grid) {
       grid.innerHTML = candidates.map((item, idx) => {
         const choiceNum = idx + 1;
-        const img = item.backdrop || item.poster || generateCardSvg(item.title, item.year, item.quality);
+        const img = sanitizeImgUrl(item.backdrop || item.poster) || generateCardSvg(item.title, item.year, item.quality);
         const isTop = (idx === 0);
         return `
           <div class="voice-card ${isTop ? 'voice-card-top' : ''}" onclick="launchMovieDirectly(_voiceResults[${idx}])" id="voiceCard_${idx}">
             <div class="voice-card-choice-num">${choiceNum}</div>
             <div class="voice-card-thumb-wrap">
-              <img src="${img}" alt="${escapeHtml(item.title)}" class="voice-card-img" onerror="this.onerror=null; this.src=generateCardSvg('${escapeJs(item.title)}', '${item.year || ''}', '${item.quality || 'HD'}');">
+              <img src="${img}" alt="${escapeHtml(item.title)}" class="voice-card-img" data-title="${escapeHtml(item.title)}" data-year="${escapeHtml(item.year || '')}" data-quality="${escapeHtml(item.quality || 'HD')}" onerror="handleCardImgError(this);">
             </div>
             <div class="voice-card-body">
               <div class="voice-card-title">${escapeHtml(item.title)}</div>
@@ -4300,10 +4372,11 @@ function renderTvCards() {
   if (state.tvFocusIndex < 0) state.tvFocusIndex = 0;
 
   tvCardsGrid.innerHTML = pageItems.map((item, idx) => {
+    const posterImg = sanitizeImgUrl(item.backdrop || item.poster) || generateCardSvg(item.title, item.year, item.quality);
     return `
       <div class="tv-card" id="tvCard_${idx}" onclick="handleTvCardClick(${idx})">
         <div class="tv-card-thumb-wrap">
-          <img src="${item.backdrop || item.poster}" alt="${escapeHtml(item.title)}" class="tv-card-img" onerror="this.onerror=null; this.src=generateCardSvg('${escapeJs(item.title)}', '${item.year || ''}', '${item.quality || 'HD'}');">
+          <img src="${posterImg}" alt="${escapeHtml(item.title)}" class="tv-card-img" data-title="${escapeHtml(item.title)}" data-year="${escapeHtml(item.year || '')}" data-quality="${escapeHtml(item.quality || 'HD')}" onerror="handleCardImgError(this);">
         </div>
         <div class="tv-card-body">
           <div class="tv-card-title">${escapeHtml(item.title)}</div>

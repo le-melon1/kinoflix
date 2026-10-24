@@ -1,36 +1,16 @@
 // --- KINOFLIX SERVICE WORKER (PWA) ---
-const CACHE_NAME = 'kinoflix-shell-v1';
-const SHELL_ASSETS = [
-  '/',
-  '/index.html',
-  '/style.css?v=3.2',
-  '/app.js?v=3.2',
-  '/manifest.json',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
-  '/icons/apple-touch-icon.png'
-];
+const CACHE_NAME = 'kinoflix-shell-v4';
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(SHELL_ASSETS).catch((err) => {
-        console.warn('PWA Precache warning:', err);
-      });
-    }).then(() => self.skipWaiting())
-  );
+  // Skip waiting immediately to replace any stale service worker
+  self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
+  // Delete all old cache stores to ensure fresh assets
   event.waitUntil(
     caches.keys().then((keys) => {
-      return Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME) {
-            return caches.delete(key);
-          }
-        })
-      );
+      return Promise.all(keys.map((key) => caches.delete(key)));
     }).then(() => self.clients.claim())
   );
 });
@@ -38,7 +18,7 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Bypass cache for video streaming, torrents, or downloads
+  // Bypass cache completely for stream endpoints
   if (
     url.pathname.startsWith('/api/stream') ||
     url.pathname.startsWith('/stream') ||
@@ -47,36 +27,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Network-first for catalog/search API, fallback to cache
-  if (url.pathname.startsWith('/api/')) {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          if (response && response.status === 200) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-          }
-          return response;
-        })
-        .catch(() => caches.match(event.request))
-    );
-    return;
-  }
-
-  // Stale-while-revalidate for static files (html, css, js, images)
+  // Network-first policy for all assets
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      const fetchPromise = fetch(event.request)
-        .then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const clone = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-          }
-          return networkResponse;
-        })
-        .catch(() => cachedResponse);
-
-      return cachedResponse || fetchPromise;
-    })
+    fetch(event.request)
+      .then((response) => {
+        if (response && response.status === 200 && event.request.method === 'GET') {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone)).catch(() => {});
+        }
+        return response;
+      })
+      .catch(() => caches.match(event.request))
   );
 });

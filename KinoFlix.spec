@@ -12,7 +12,8 @@ a = Analysis(
     binaries=[],
     datas=[
         ('static', 'static'),
-        ('backend', 'backend')
+        ('backend', 'backend'),
+        ('bin', 'bin')
     ],
     hiddenimports=[
         'uvicorn',

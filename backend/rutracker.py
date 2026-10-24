@@ -51,7 +51,7 @@ class RuTrackerClient:
     def get_proxy(self) -> Optional[str]:
         if self.custom_proxy:
             return self.custom_proxy
-        return None
+        return detect_best_proxy()
 
     def get_client(self, timeout: float = 10.0) -> httpx.AsyncClient:
         proxy = self.get_proxy()

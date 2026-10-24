@@ -1,7 +1,8 @@
-import backend.metadata  # Early monkeypatch for socket.getaddrinfo (DoH & anti-DNS-poisoning)
 import os
 import sys
 import re
+import shutil
+import platform
 import asyncio
 import urllib.parse
 from typing import Optional, List, Dict, Any
@@ -11,14 +12,33 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel
 import subprocess
-import threading
+
+def get_ffmpeg_bin() -> str:
+    if sys.platform == "darwin" and os.path.exists("/opt/homebrew/bin/ffmpeg"):
+        return "/opt/homebrew/bin/ffmpeg"
+    elif sys.platform == "win32":
+        bin_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin")
+        for cand in [os.path.join(bin_dir, "ffmpeg.exe"), "ffmpeg.exe", "ffmpeg"]:
+            if shutil.which(cand) or os.path.exists(cand):
+                return cand
+    return "ffmpeg"
 
 from backend.rutor import search_rutor
 from backend.rutracker import rutracker_client
-from backend.torrserver import torrserver_mgr, FFMPEG_BIN, FFPROBE_BIN
+from backend.torrserver import torrserver_mgr
 from backend.settings import settings_mgr
 
 app = FastAPI(title="KinoFlix - Instant Torrent Cinema", version="3.2.0")
+
+@app.middleware("http")
+async def add_no_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path.endswith((".js", ".css", ".html")) or path == "/":
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
 
@@ -52,15 +72,14 @@ class SpeedLimitRequest(BaseModel):
     upload_kb: int
 
 @app.on_event("startup")
-def startup_event():
-    import threading
-    def bg():
-        try:
-            torrserver_mgr.start()
-            settings_mgr._apply_side_effects()
-        except Exception as e:
-            print(f"Background warmup error: {e}")
-    threading.Thread(target=bg, daemon=True).start()
+async def startup_event():
+    # Warm up TorrServer, apply persistent settings and check rutracker session
+    torrserver_mgr.start()
+    try:
+        settings_mgr._apply_side_effects()
+    except Exception:
+        pass
+    await rutracker_client.check_session()
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -69,6 +88,7 @@ async def shutdown_event():
 @app.get("/api/network/status")
 async def get_network_status():
     from backend.torrserver import get_physical_net_info, is_vpn_active
+    torrserver_mgr.ensure_running()
     vpn_on = is_vpn_active()
     iface, ip, gw = get_physical_net_info()
     proxy = rutracker_client.get_proxy()
@@ -78,7 +98,7 @@ async def get_network_status():
         "physical_ip": ip,
         "physical_gateway": gw,
         "proxy_detected": proxy,
-        "rutracker_routing": f"Кастомный прокси ({proxy})" if proxy else f"В обход VPN через rutracker.net ({iface})",
+        "rutracker_routing": f"Через VPN / Прокси ({proxy})" if proxy else ("Через системный VPN" if vpn_on else "Прямое подключение"),
         "stream_routing": f"В обход VPN через {iface} (Прямой интернет)" if vpn_on else f"Прямой домашний интернет ({iface})"
     }
 
@@ -114,70 +134,21 @@ async def clear_history_endpoint():
     return {"status": "ok", "message": "История просмотров очищена"}
 
 
-def rewrite_image_urls(obj):
-    if isinstance(obj, dict):
-        return {k: rewrite_image_urls(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [rewrite_image_urls(elem) for elem in obj]
-    elif isinstance(obj, str):
-        if "image.tmdb.org/t/p/" in obj:
-            idx = obj.find("/t/p/")
-            if idx != -1:
-                return f"/api/image/tmdb?path={obj[idx+4:]}"
-        return obj
-    return obj
-
-_img_cache: Dict[str, tuple] = {}
-_img_lock = threading.Lock()
-
-@app.get("/api/image/tmdb")
-async def tmdb_image_proxy(path: str = Query(...)):
-    """Proxy TMDB images with RAM caching so user browser displays covers even if TMDB domain is DNS-filtered"""
-    clean_path = path.lstrip("/")
-    with _img_lock:
-        if clean_path in _img_cache:
-            content, media_type = _img_cache[clean_path]
-            return Response(
-                content=content,
-                media_type=media_type,
-                headers={"Cache-Control": "public, max-age=604800"}
-            )
-
-    for base in ("https://image.tmdb.org/t/p/", "https://tmdb-image-prod.b-cdn.net/t/p/"):
-        tmdb_cdn_url = f"{base}{clean_path}"
-        try:
-            async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
-                resp = await client.get(tmdb_cdn_url)
-                if resp.status_code == 200:
-                    media_type = resp.headers.get("content-type", "image/jpeg")
-                    with _img_lock:
-                        if len(_img_cache) > 800:
-                            _img_cache.clear()
-                        _img_cache[clean_path] = (resp.content, media_type)
-                    return Response(
-                        content=resp.content,
-                        media_type=media_type,
-                        headers={"Cache-Control": "public, max-age=604800"}
-                    )
-        except Exception:
-            continue
-    raise HTTPException(status_code=404, detail="Image not found")
-
 @app.get("/api/catalog")
 async def get_catalog():
     from backend.catalog import get_home_catalog
-    return rewrite_image_urls(get_home_catalog())
+    return get_home_catalog()
 
 @app.get("/api/catalog/more")
 async def get_catalog_more(category: str = Query(...), page: int = Query(1)):
     from backend.catalog import get_more_category_movies
     items = await get_more_category_movies(category, page)
-    return rewrite_image_urls({
+    return {
         "category": category,
         "page": page,
         "items": items,
         "has_more": len(items) > 0
-    })
+    }
 
 @app.get("/api/settings/rutracker/status")
 async def get_rutracker_status():
@@ -250,9 +221,7 @@ async def search(
 
     # Automatically discover canonical Russian and original titles online
     online_info = await resolve_movie_online(query)
-    search_terms = list(online_info.get("search_terms") or [])
-    if query not in search_terms:
-        search_terms.append(query)
+    search_terms = online_info.get("search_terms") or [query]
     
     min_seeds = settings_mgr.get("search", "min_seeders", 2)
     pref_quality = settings_mgr.get("playback", "default_quality", "4k")
@@ -283,26 +252,14 @@ async def search(
         if any(r.get("seeds", 0) >= 15 for r in results):
             break
 
-    # STRICT FILTER: Prefer releases with >= min_seeds, fallback to >= 1 seed if none found
-    healthy_results = [r for r in results if r.get("seeds", 0) >= min_seeds]
-    if not healthy_results:
-        healthy_results = [r for r in results if r.get("seeds", 0) >= 1]
-    results = healthy_results
+    # STRICT FILTER: Never return dead torrents without seeds
+    results = [r for r in results if r.get("seeds", 0) >= min_seeds]
 
     # Sort strictly by seeders descending
     results.sort(key=lambda x: x.get("seeds", 0), reverse=True)
 
     # Enrich each release with distinct artwork and title from TMDB
     results = await enrich_search_results(results)
-
-    # Ensure every individual release card has a valid poster/backdrop
-    fallback_poster = online_info.get("poster")
-    fallback_backdrop = online_info.get("backdrop") or fallback_poster
-    for r in results:
-        if not r.get("poster"):
-            r["poster"] = fallback_poster or fallback_backdrop
-        if not r.get("backdrop"):
-            r["backdrop"] = fallback_backdrop or r.get("poster")
 
     has_seasons = any(r.get("season_label") for r in results)
     is_tv = online_info.get("is_series", False) or has_seasons
@@ -330,18 +287,24 @@ async def search(
         preferred_audio=pref_audio
     )
 
-    return rewrite_image_urls({
+    return {
         "query": query,
         "movie": movie_info,
         "verified_editions": verified_cards,
         "count": len(results),
         "results": results[:limit]
-    })
+    }
 
 
-async def resolve_magnet_for_request(req: StreamPrepareRequest) -> Optional[str]:
+@app.post("/api/stream/prepare")
+async def prepare_stream(req: StreamPrepareRequest, background_tasks: BackgroundTasks):
+    torrserver_mgr.ensure_running()
     magnet = req.magnet
-    # 1. If direct link is provided
+    # If topic_id is provided, resolve magnet
+    if not magnet and req.topic_id:
+        magnet = await rutracker_client.get_topic_magnet(req.topic_id)
+    
+    # If link is provided (direct magnet or topic URL)
     if not magnet and req.link:
         if req.link.startswith("magnet:?"):
             magnet = req.link
@@ -349,64 +312,23 @@ async def resolve_magnet_for_request(req: StreamPrepareRequest) -> Optional[str]
             t_m = re.search(r'viewtopic\.php\?t=(\d+)', req.link)
             if t_m:
                 magnet = await rutracker_client.get_topic_magnet(t_m.group(1))
-    
-    # 2. If topic_id is provided, try rutracker_client
-    if not magnet and req.topic_id:
-        magnet = await rutracker_client.get_topic_magnet(req.topic_id)
 
-    # 3. SMART NO-VPN FALLBACK: If magnet is still missing, automatically resolve from Rutor or Torrents-CSV by title!
     if not magnet and req.title:
-        search_q = req.title.strip()
-        clean_q = re.sub(r'[/\\?%*:|"<>\[\]]', ' ', search_q).strip()
-        clean_q = re.sub(r'\s+', ' ', clean_q)
-
-        from backend.metadata import extract_movie_names
-        parsed = extract_movie_names(clean_q)
-        terms = []
-        if clean_q:
-            terms.append(clean_q)
-        if parsed.get("ru_title") and parsed["ru_title"] not in terms:
-            terms.append(parsed["ru_title"])
-        if parsed.get("en_title") and parsed["en_title"] not in terms:
-            terms.append(parsed["en_title"])
-
-        for term in terms:
-            try:
-                candidates = await search_rutor(term, limit=10, min_seeds=1)
-                if candidates:
-                    q_tag = "1080" if "1080" in clean_q else ("2160" if ("2160" in clean_q or "4K" in clean_q.upper()) else "")
-                    chosen = candidates[0]
-                    if q_tag:
-                        for c in candidates:
-                            if q_tag in c.get("title", ""):
-                                chosen = c
-                                break
-                    if chosen.get("magnet"):
-                        magnet = chosen["magnet"]
+        from backend.metadata import resolve_movie_online
+        try:
+            online_info = await resolve_movie_online(req.title)
+            terms = online_info.get("search_terms") or [req.title]
+            for term in terms:
+                r_list = await search_rutor(term, limit=10, min_seeds=1)
+                for r in r_list:
+                    if r.get("magnet"):
+                        magnet = r["magnet"]
                         break
-            except Exception:
-                pass
+                if magnet:
+                    break
+        except Exception:
+            pass
 
-        if not magnet:
-            try:
-                async with httpx.AsyncClient(timeout=4.0) as client:
-                    for term in terms:
-                        r = await client.get(f"https://torrents-csv.com/service/search?q={urllib.parse.quote(term)}")
-                        if r.status_code == 200:
-                            t_list = r.json().get("torrents", [])
-                            if t_list:
-                                ih = t_list[0].get("infohash")
-                                if ih:
-                                    magnet = f"magnet:?xt=urn:btih:{ih}&dn={urllib.parse.quote(term)}&tr=http://retracker.local/announce&tr=udp://tracker.openbittorrent.com:80/announce&tr=udp://tracker.opentrackr.org:1337/announce"
-                                    break
-            except Exception:
-                pass
-
-    return magnet
-
-@app.post("/api/stream/prepare")
-async def prepare_stream(req: StreamPrepareRequest, background_tasks: BackgroundTasks):
-    magnet = await resolve_magnet_for_request(req)
     if not magnet:
         raise HTTPException(status_code=400, detail="Не удалось получить magnet-ссылку для этой раздачи")
 
@@ -424,7 +346,35 @@ async def preload_stream(req: StreamPrepareRequest, background_tasks: Background
     Preloads the first seconds of a movie or TV show as soon as user opens its page.
     Enables instant 0-second latency playback when user clicks Play.
     """
-    magnet = await resolve_magnet_for_request(req)
+    torrserver_mgr.ensure_running()
+    magnet = req.magnet
+    if not magnet and req.topic_id:
+        magnet = await rutracker_client.get_topic_magnet(req.topic_id)
+    
+    if not magnet and req.link:
+        if req.link.startswith("magnet:?"):
+            magnet = req.link
+        else:
+            t_m = re.search(r'viewtopic\.php\?t=(\d+)', req.link)
+            if t_m:
+                magnet = await rutracker_client.get_topic_magnet(t_m.group(1))
+
+    if not magnet and req.title:
+        from backend.metadata import resolve_movie_online
+        try:
+            online_info = await resolve_movie_online(req.title)
+            terms = online_info.get("search_terms") or [req.title]
+            for term in terms:
+                r_list = await search_rutor(term, limit=10, min_seeds=1)
+                for r in r_list:
+                    if r.get("magnet"):
+                        magnet = r["magnet"]
+                        break
+                if magnet:
+                    break
+        except Exception:
+            pass
+
     if not magnet:
         raise HTTPException(status_code=400, detail="Не удалось получить magnet-ссылку для предзагрузки")
 
@@ -440,6 +390,7 @@ async def preload_stream(req: StreamPrepareRequest, background_tasks: Background
 
 @app.get("/api/stream/stats")
 async def stream_stats(hash: Optional[str] = None):
+    torrserver_mgr.ensure_running()
     stats = await torrserver_mgr.get_stats(hash)
     return stats
 
@@ -573,7 +524,7 @@ async def stream_browser_audio(
     Includes sample-accurate aresample synchronization to prevent audio lag.
     """
     torr_url = f"http://127.0.0.1:8090/stream/stream.mkv?link={link}&index={index}&play"
-    ffmpeg_bin = FFMPEG_BIN
+    ffmpeg_bin = get_ffmpeg_bin()
 
     audio_idx = audio
     video_args = ["-c:v", "copy"]
@@ -600,7 +551,7 @@ async def stream_browser_audio(
         else:
             # VideoToolbox hardware encoder on macOS - 15x real-time speed, 0% CPU!
             # Eliminates black screen for XviD/AVI (Доктор Хаус), HEVC, 10-bit anime, etc.
-            if os.path.exists("/opt/homebrew/bin/ffmpeg"):
+            if sys.platform == "darwin" and os.path.exists("/opt/homebrew/bin/ffmpeg"):
                 video_args = [
                     "-c:v", "h264_videotoolbox",
                     "-b:v", "4500k",
@@ -640,12 +591,21 @@ async def stream_browser_audio(
             pass
 
         if fname.endswith((".avi", ".wmv", ".vob", ".flv", ".mpg", ".mpeg", ".divx")):
-            video_args = [
-                "-c:v", "h264_videotoolbox",
-                "-b:v", "4500k",
-                "-pix_fmt", "yuv420p",
-                "-realtime", "true"
-            ]
+            if sys.platform == "darwin" and os.path.exists("/opt/homebrew/bin/ffmpeg"):
+                video_args = [
+                    "-c:v", "h264_videotoolbox",
+                    "-b:v", "4500k",
+                    "-pix_fmt", "yuv420p",
+                    "-realtime", "true"
+                ]
+            else:
+                video_args = [
+                    "-c:v", "libx264",
+                    "-preset", "ultrafast",
+                    "-tune", "zerolatency",
+                    "-b:v", "4000k",
+                    "-pix_fmt", "yuv420p"
+                ]
         else:
             video_args = ["-c:v", "copy"]
 
@@ -685,14 +645,14 @@ async def stream_browser_audio(
         "pipe:1"
     ])
 
-    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        bufsize=1024*1024,
-        creationflags=creationflags
-    )
+    popen_kwargs = {
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.DEVNULL,
+        "bufsize": 1024 * 1024
+    }
+    if sys.platform == "win32":
+        popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    proc = subprocess.Popen(cmd, **popen_kwargs)
 
     async def iter_chunks():
         try:
@@ -732,22 +692,45 @@ async def image_proxy(url: str):
         c = _img_cache[url]
         return Response(content=c["bytes"], media_type=c["type"], headers={"Cache-Control": "public, max-age=604800"})
 
+    # If TMDB image, route via fast Cloudflare wsrv.nl mirror which works 100% in Russia
+    fetch_urls = [url]
+    if "image.tmdb.org" in url:
+        clean = url.replace("https://", "").replace("http://", "")
+        fetch_urls.insert(0, f"https://wsrv.nl/?url={clean}")
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "image/*"
+    }
+
     try:
         async with httpx.AsyncClient(timeout=4.0, follow_redirects=True) as client:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "image/*"
-            }
-            r = await client.get(url, headers=headers)
-            if r.status_code == 200:
-                media_type = r.headers.get("content-type", "image/jpeg")
-                if len(_img_cache) < 200:
-                    _img_cache[url] = {"bytes": r.content, "type": media_type}
-                return Response(content=r.content, media_type=media_type, headers={"Cache-Control": "public, max-age=604800"})
+            for u in fetch_urls:
+                try:
+                    r = await client.get(u, headers=headers)
+                    if r.status_code == 200 and len(r.content) > 100:
+                        media_type = r.headers.get("content-type", "image/jpeg")
+                        if len(_img_cache) < 300:
+                            _img_cache[url] = {"bytes": r.content, "type": media_type}
+                        return Response(content=r.content, media_type=media_type, headers={"Cache-Control": "public, max-age=604800"})
+                except Exception:
+                    continue
     except Exception:
         pass
 
-    svg = '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 300 450"><rect width="300" height="450" fill="#181818"/><text x="50%" y="50%" fill="#555" font-family="sans-serif" font-size="20" font-weight="bold" text-anchor="middle">KinoFlix</text></svg>'
+    svg = '''<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 300 450">
+      <defs>
+        <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#2a0808"/>
+          <stop offset="50%" stop-color="#141414"/>
+          <stop offset="100%" stop-color="#0a0a0a"/>
+        </linearGradient>
+      </defs>
+      <rect width="300" height="450" fill="url(#g)"/>
+      <circle cx="150" cy="200" r="45" fill="#222" stroke="#e50914" stroke-width="2"/>
+      <polygon points="142,180 166,200 142,220" fill="#e50914"/>
+      <text x="50%" y="280" fill="#fff" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="18" font-weight="bold" text-anchor="middle">KinoFlix</text>
+    </svg>'''
     return Response(content=svg.encode('utf-8'), media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=3600"})
 
 @app.get("/api/stream/tracks")
@@ -760,7 +743,7 @@ async def stream_tracks(link: str, index: int = 1):
 async def get_stream_subtitles(link: str, index: int = 1, sub_id: int = 0):
     """Extract embedded subtitle track and stream as WebVTT on the fly"""
     from backend.torrserver import TORRSERVER_URL
-    ffmpeg_bin = "/opt/homebrew/bin/ffmpeg" if os.path.exists("/opt/homebrew/bin/ffmpeg") else "ffmpeg"
+    ffmpeg_bin = get_ffmpeg_bin()
     torr_url = f"{TORRSERVER_URL}/stream?link={link}&index={index}&play"
     cmd = [
         ffmpeg_bin,
@@ -771,7 +754,10 @@ async def get_stream_subtitles(link: str, index: int = 1, sub_id: int = 0):
         "pipe:1"
     ]
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        popen_kwargs = {"stdout": subprocess.PIPE, "stderr": subprocess.DEVNULL}
+        if sys.platform == "win32":
+            popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        proc = subprocess.Popen(cmd, **popen_kwargs)
         out, _ = proc.communicate(timeout=6.0)
         if not out or not out.startswith(b"WEBVTT"):
             out = b"WEBVTT\n\n"
@@ -792,25 +778,34 @@ async def open_external(req: ExternalPlayerRequest):
     player = req.player.lower()
     
     try:
-        if sys.platform == "win32":
-            if player == "vlc":
-                vlc_paths = [
-                    r"C:\Program Files\VideoLAN\VLC\vlc.exe",
-                    r"C:\Program Files (x86)\VideoLAN\VLC\vlc.exe"
-                ]
-                vlc_bin = next((p for p in vlc_paths if os.path.exists(p)), "vlc")
-                subprocess.Popen([vlc_bin, url])
-            else:
-                os.startfile(url)
-        else:
+        if sys.platform == "darwin":
             if player == "iina":
                 subprocess.Popen(["open", "-a", "IINA", url])
             elif player == "vlc":
                 subprocess.Popen(["open", "-a", "VLC", url])
             else:
+                # Try IINA first, then VLC, then default
                 res = subprocess.run(["open", "-a", "IINA", url], capture_output=True)
                 if res.returncode != 0:
                     subprocess.Popen(["open", "-a", "VLC", url])
+        elif sys.platform == "win32":
+            vlc_candidates = [
+                r"C:\Program Files\VideoLAN\VLC\vlc.exe",
+                r"C:\Program Files (x86)\VideoLAN\VLC\vlc.exe",
+                "vlc.exe"
+            ]
+            vlc_bin = None
+            for cand in vlc_candidates:
+                if os.path.exists(cand) or shutil.which(cand):
+                    vlc_bin = cand
+                    break
+            
+            if vlc_bin:
+                subprocess.Popen([vlc_bin, url])
+            else:
+                os.startfile(url)
+        else:
+            subprocess.Popen(["xdg-open", url])
         return {"success": True}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -846,7 +841,12 @@ async def open_downloads_folder():
     target = download_mgr.downloads_dir
     os.makedirs(target, exist_ok=True)
     try:
-        subprocess.Popen(["open", target])
+        if sys.platform == "win32":
+            os.startfile(target)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", target])
+        else:
+            subprocess.Popen(["xdg-open", target])
         return {"success": True, "path": target}
     except Exception as e:
         return {"success": False, "error": str(e)}

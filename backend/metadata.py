@@ -3,76 +3,18 @@ import urllib.parse
 from typing import Optional, Dict, Any, List
 import httpx
 
-import socket
-import threading
-
-KNOWN_FALLBACK_IPS: Dict[str, List[str]] = {
-    "api.themoviedb.org": ["99.84.91.2", "99.84.91.26", "99.84.91.43", "99.84.91.45"],
-    "image.tmdb.org": ["138.199.36.7", "138.199.37.231"],
-    "tmdb-image-prod.b-cdn.net": ["138.199.36.7", "138.199.37.231"],
-    "rutor.info": ["193.46.255.29"],
-    "rutor.is": ["193.46.255.26", "193.46.255.29"],
-    "open-rutor.org": ["193.46.255.29"],
-    "rutracker.net": ["188.114.97.10", "188.114.96.10"],
-    "rutracker.org": ["172.67.182.196", "104.21.32.39"]
-}
-DOH_DOMAINS = set(KNOWN_FALLBACK_IPS.keys())
-
-_orig_getaddrinfo = socket.getaddrinfo
-_doh_ip_cache: Dict[str, List[str]] = dict(KNOWN_FALLBACK_IPS)
-_doh_lock = threading.Lock()
-
-def _resolve_doh_ips(host: str) -> List[str]:
-    ips = []
-    # Query direct IPs with verify=False so zero DNS resolution is required for the DoH resolver itself
-    for url in [
-        f"https://1.1.1.1/dns-query?name={host}&type=A",
-        f"https://8.8.8.8/resolve?name={host}&type=A"
-    ]:
-        try:
-            r = httpx.get(url, headers={"accept": "application/dns-json"}, timeout=1.8, verify=False)
-            if r.status_code == 200:
-                for a in r.json().get("Answer", []):
-                    if a.get("type") == 1 and a.get("data"):
-                        ips.append(a["data"])
-                if ips:
-                    break
-        except Exception:
-            continue
-    return ips
-
-def _patched_getaddrinfo(host, port, *args, **kwargs):
-    host_str = host.decode("utf-8", "ignore").strip() if isinstance(host, bytes) else (str(host).strip() if host else "")
-    if host_str in DOH_DOMAINS:
-        with _doh_lock:
-            ips = _doh_ip_cache.get(host_str)
-        if not ips:
-            ips = _resolve_doh_ips(host_str)
-            if ips:
-                with _doh_lock:
-                    _doh_ip_cache[host_str] = ips
-            else:
-                ips = KNOWN_FALLBACK_IPS.get(host_str, [])
-
-        if ips:
-            results = []
-            for ip in ips:
-                try:
-                    res = _orig_getaddrinfo(ip, port, *args, **kwargs)
-                    results.extend(res)
-                except Exception:
-                    pass
-            if results:
-                return results
-
-    return _orig_getaddrinfo(host, port, *args, **kwargs)
-
-socket.getaddrinfo = _patched_getaddrinfo
-
 OMDB_KEYS = ["trilogy", "70252528", "thewdb", "b7da8d63"]
 
 # In-memory cache for movie metadata
 metadata_cache: Dict[str, Dict[str, Any]] = {}
+
+def tmdb_img_mirror(url: Optional[str]) -> Optional[str]:
+    if not url:
+        return url
+    if "image.tmdb.org" in url:
+        clean = url.replace("https://", "").replace("http://", "")
+        return f"https://wsrv.nl/?url={clean}"
+    return url
 
 def extract_movie_names(torrent_title: str) -> Dict[str, Optional[str]]:
     """
@@ -174,8 +116,8 @@ async def fetch_movie_metadata(query: str, results: Optional[List[Dict[str, Any]
                         year_val = rel_date[:4] if len(rel_date) >= 4 else (best_parsed.get("year") or "2024")
                         vote_avg = str(round(top_tmdb.get("vote_average", 8.2), 1))
                         
-                        poster_url = f"/api/image/tmdb?path=/w780{p_path}" if p_path else None
-                        backdrop_url = f"/api/image/tmdb?path=/w1280{b_path}" if b_path else poster_url
+                        poster_url = tmdb_img_mirror(f"https://image.tmdb.org/t/p/w780{p_path}") if p_path else None
+                        backdrop_url = tmdb_img_mirror(f"https://image.tmdb.org/t/p/w1280{b_path}") if b_path else poster_url
                         
                         res = {
                             "title": m_title,
@@ -282,63 +224,56 @@ async def enrich_search_results(results: List[Dict[str, Any]]) -> List[Dict[str,
         return results
 
     # Group by extracted title/year to minimize TMDB API calls
-    unique_items: List[tuple] = []
-    seen_keys = set()
-    for item in results[:24]:
-        parsed = extract_movie_names(item.get("title", ""))
-        lookup_term = parsed.get("en_title") or parsed.get("ru_title")
-        if lookup_term:
-            query_key = lookup_term.strip().lower()
-            if query_key not in seen_keys:
-                seen_keys.add(query_key)
-                unique_items.append((query_key, lookup_term, parsed.get("year"), parsed))
-
-    async def _fetch_tmdb_item(client: httpx.AsyncClient, query_key: str, lookup_term: str, yr: Optional[str], parsed: Dict[str, Any]):
-        try:
-            tmdb_url = f"https://api.themoviedb.org/3/search/multi?api_key=1cf50e6248dc270629e802686245c2c8&query={urllib.parse.quote(lookup_term)}&language=ru-RU"
-            r = await client.get(tmdb_url)
-            if r.status_code == 200:
-                tdata = r.json()
-                tresults = tdata.get("results", [])
-                if tresults:
-                    chosen = tresults[0]
-                    if yr:
-                        for cand in tresults:
-                            cand_date = cand.get("release_date") or cand.get("first_air_date") or ""
-                            if cand_date.startswith(yr):
-                                chosen = cand
-                                break
-
-                    p_path = chosen.get("poster_path")
-                    b_path = chosen.get("backdrop_path")
-                    m_title = chosen.get("title") or chosen.get("name") or parsed.get("ru_title")
-                    rel_date = chosen.get("release_date") or chosen.get("first_air_date") or ""
-                    year_val = rel_date[:4] if len(rel_date) >= 4 else (parsed.get("year") or "2024")
-
-                    poster_url = f"/api/image/tmdb?path=/w780{p_path}" if p_path else None
-                    backdrop_url = f"/api/image/tmdb?path=/w1280{b_path}" if b_path else poster_url
-
-                    return (query_key, {
-                        "display_title": m_title,
-                        "display_year": year_val,
-                        "poster": poster_url,
-                        "backdrop": backdrop_url,
-                        "rating": str(round(chosen.get("vote_average", 8.0), 1)) if chosen.get("vote_average") else "8.2",
-                        "overview": chosen.get("overview") or "",
-                        "media_type": chosen.get("media_type")
-                    })
-        except Exception:
-            pass
-        return (query_key, None)
-
     lookup_map: Dict[str, Optional[Dict[str, Any]]] = {}
-    if unique_items:
-        import asyncio
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            gathered = await asyncio.gather(*[_fetch_tmdb_item(client, *u) for u in unique_items], return_exceptions=True)
-            for item_res in gathered:
-                if isinstance(item_res, tuple):
-                    lookup_map[item_res[0]] = item_res[1]
+
+    async with httpx.AsyncClient(timeout=3.5) as client:
+        for item in results[:24]:
+            parsed = extract_movie_names(item.get("title", ""))
+            query_key = (parsed.get("en_title") or parsed.get("ru_title") or "").strip().lower()
+            if not query_key or query_key in lookup_map:
+                continue
+
+            lookup_term = parsed.get("en_title") or parsed.get("ru_title")
+            try:
+                tmdb_url = f"https://api.themoviedb.org/3/search/multi?api_key=1cf50e6248dc270629e802686245c2c8&query={urllib.parse.quote(lookup_term)}&language=ru-RU"
+                r = await client.get(tmdb_url)
+                if r.status_code == 200:
+                    tdata = r.json()
+                    tresults = tdata.get("results", [])
+                    if tresults:
+                        chosen = tresults[0]
+                        yr = parsed.get("year")
+                        if yr:
+                            for cand in tresults:
+                                cand_date = cand.get("release_date") or cand.get("first_air_date") or ""
+                                if cand_date.startswith(yr):
+                                    chosen = cand
+                                    break
+
+                        p_path = chosen.get("poster_path")
+                        b_path = chosen.get("backdrop_path")
+                        m_title = chosen.get("title") or chosen.get("name") or parsed.get("ru_title")
+                        rel_date = chosen.get("release_date") or chosen.get("first_air_date") or ""
+                        year_val = rel_date[:4] if len(rel_date) >= 4 else (parsed.get("year") or "2024")
+
+                        poster_url = tmdb_img_mirror(f"https://image.tmdb.org/t/p/w780{p_path}") if p_path else None
+                        backdrop_url = tmdb_img_mirror(f"https://image.tmdb.org/t/p/w1280{b_path}") if b_path else poster_url
+
+                        lookup_map[query_key] = {
+                            "display_title": m_title,
+                            "display_year": year_val,
+                            "poster": poster_url,
+                            "backdrop": backdrop_url,
+                            "rating": str(round(chosen.get("vote_average", 8.0), 1)) if chosen.get("vote_average") else "8.2",
+                            "overview": chosen.get("overview") or "",
+                            "media_type": chosen.get("media_type")
+                        }
+                    else:
+                        lookup_map[query_key] = None
+                else:
+                    lookup_map[query_key] = None
+            except Exception:
+                lookup_map[query_key] = None
 
     # Apply lookups to results
     for item in results:
@@ -412,9 +347,9 @@ async def resolve_movie_online(query: str) -> Dict[str, Any]:
                     p_path = top.get("poster_path")
                     b_path = top.get("backdrop_path")
                     if p_path:
-                        poster_url = f"/api/image/tmdb?path=/w780{p_path}"
+                        poster_url = tmdb_img_mirror(f"https://image.tmdb.org/t/p/w780{p_path}")
                     if b_path:
-                        backdrop_url = f"/api/image/tmdb?path=/w1280{b_path}"
+                        backdrop_url = tmdb_img_mirror(f"https://image.tmdb.org/t/p/w1280{b_path}")
                     rating_val = str(round(top.get("vote_average", 8.0), 1))
                     plot_val = top.get("overview") or ""
     except Exception as e:

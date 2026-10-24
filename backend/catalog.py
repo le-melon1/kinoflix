@@ -1,5 +1,22 @@
-# Netflix Catalog with ALL Classic Genres and Streaming Presets
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+
+def tmdb_img_mirror(url: Optional[str]) -> Optional[str]:
+    if not url:
+        return url
+    if "image.tmdb.org" in url:
+        clean = url.replace("https://", "").replace("http://", "")
+        return f"https://wsrv.nl/?url={clean}"
+    return url
+
+def transform_movie_imgs(movie: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(movie, dict):
+        return movie
+    m = dict(movie)
+    if "backdrop" in m and m["backdrop"]:
+        m["backdrop"] = tmdb_img_mirror(m["backdrop"])
+    if "poster" in m and m["poster"]:
+        m["poster"] = tmdb_img_mirror(m["poster"])
+    return m
 
 ALL_GENRES = [
     {"id": "all", "name": "Всё", "icon": "🎬"},
@@ -1101,10 +1118,20 @@ def get_home_catalog() -> Dict[str, Any]:
         }
     ]
 
+    billboard = transform_movie_imgs(TRENDING_MOVIES[0])
+    transformed_categories = []
+    for cat in categories:
+        transformed_categories.append({
+            "id": cat["id"],
+            "title": cat["title"],
+            "is_top10": cat.get("is_top10", False),
+            "items": [transform_movie_imgs(it) for it in cat.get("items", [])]
+        })
+
     return {
-        "billboard": TRENDING_MOVIES[0],
+        "billboard": billboard,
         "genres": ALL_GENRES,
-        "categories": categories
+        "categories": transformed_categories
     }
 
 _cat_page_cache: Dict[str, List[Dict[str, Any]]] = {}
@@ -1197,8 +1224,8 @@ async def get_more_category_movies(category_id: str, page: int = 1) -> List[Dict
                         "quality": "4K UHD" if rating >= 7.5 else "1080p Full HD",
                         "audio": "Дубляж • Лицензия",
                         "genre": "Рекомендации KinoFlix",
-                        "backdrop": f"https://image.tmdb.org/t/p/w1280{b_path}" if b_path else f"https://image.tmdb.org/t/p/w780{p_path}",
-                        "poster": f"https://image.tmdb.org/t/p/w780{p_path}" if p_path else f"https://image.tmdb.org/t/p/w1280{b_path}",
+                        "backdrop": tmdb_img_mirror(f"https://image.tmdb.org/t/p/w1280{b_path}" if b_path else f"https://image.tmdb.org/t/p/w780{p_path}"),
+                        "poster": tmdb_img_mirror(f"https://image.tmdb.org/t/p/w780{p_path}" if p_path else f"https://image.tmdb.org/t/p/w1280{b_path}"),
                         "plot": r.get("overview") or "Захватывающий сюжет с неожиданными поворотами и великолепной актёрской игрой.",
                         "search_query": title,
                         "is_series": is_series
