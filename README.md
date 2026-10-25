@@ -1,7 +1,7 @@
 # 🎬 KinoFlix v3.2 — Мгновенный потоковый кинотеатр
 
-[![Release](https://img.shields.io/badge/release-v3.2.2-E50914?style=for-the-badge&logo=netflix&logoColor=white)](https://github.com/le-melon1/kinoflix/releases/latest)
-[![Download Windows](https://img.shields.io/badge/Download-Windows%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/le-melon1/kinoflix/releases/download/v3.2.2/KinoFlix.exe)
+[![Release](https://img.shields.io/badge/release-v3.2.3-E50914?style=for-the-badge&logo=netflix&logoColor=white)](https://github.com/le-melon1/kinoflix/releases/latest)
+[![Download Windows](https://img.shields.io/badge/Download-Windows%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/le-melon1/kinoflix/releases/download/v3.2.3/KinoFlix.exe)
 [![Platform](https://img.shields.io/badge/platform-macOS%20|%20Windows%20|%20iOS%20|%20Android-blue?style=for-the-badge)](https://github.com/le-melon1/kinoflix)
 [![Python](https://img.shields.io/badge/python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -15,9 +15,9 @@
 
 ## 📥 Скачать приложение для Windows
 
-* ⚡ **[Скачать автономный KinoFlix.exe (Standalone One-File)](https://github.com/le-melon1/kinoflix/releases/download/v3.2.2/KinoFlix.exe)** — запускается сразу в один клик без установки Python и без зависимостей.
-* 📦 **[Скачать архив KinoFlix-Windows-x64.zip](https://github.com/le-melon1/kinoflix/releases/download/v3.2.2/KinoFlix-Windows-x64.zip)**.
-* 🌐 **[Страница релиза v3.2.2 на GitHub](https://github.com/le-melon1/kinoflix/releases/tag/v3.2.2)**.
+* ⚡ **[Скачать автономный KinoFlix.exe (Standalone One-File v3.2.3)](https://github.com/le-melon1/kinoflix/releases/download/v3.2.3/KinoFlix.exe)** — запускается сразу в один клик без установки Python и без зависимостей.
+* 📦 **[Скачать архив KinoFlix-Windows-x64.zip](https://github.com/le-melon1/kinoflix/releases/download/v3.2.3/KinoFlix-Windows-x64.zip)**.
+* 🌐 **[Страница релиза v3.2.3 на GitHub](https://github.com/le-melon1/kinoflix/releases/tag/v3.2.3)**.
 
 ---
 

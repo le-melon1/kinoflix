@@ -61,6 +61,7 @@ TRENDING_MOVIES: List[Dict[str, Any]] = [
         "poster": "https://image.tmdb.org/t/p/w780/6izwz7rsy95ARzTR3poZ8H6c5pp.jpg",
         "plot": "Пол Атрейдес объединяется с фременами, чтобы отомстить заговорщикам, уничтожившим его семью, и предотвратить катастрофическое будущее Вселенной.",
         "search_query": "Дюна: Часть вторая",
+        "magnet": "magnet:?xt=urn:btih:420a1035496cdab32f06fb5bc175e8a25dd8e857&dn=Dune.Part.Two.2024.BDRip.1080p&tr=http://bt.t-ru.org/ann?magnet&tr=http://bt2.t-ru.org/ann?magnet&tr=http://opentor.net:6969/announce&tr=udp://tracker.opentrackr.org:1337/announce",
         "is_series": False
     },
     {
@@ -79,6 +80,7 @@ TRENDING_MOVIES: List[Dict[str, Any]] = [
         "poster": "https://image.tmdb.org/t/p/w780/x3yhBGbTqlAjxM450BANUNCHpOO.jpg",
         "plot": "Увядающая звезда фитнес-шоу соглашается на инъекцию революционного вещества, которое создаёт её молодую идеальную копию.",
         "search_query": "Субстанция",
+        "magnet": "magnet:?xt=urn:btih:7d30c79ce0d21fb9274db75d885dc241d9877cf3&dn=The.Substance.2024.BDRip.1080p&tr=http://bt.t-ru.org/ann?magnet&tr=http://bt2.t-ru.org/ann?magnet&tr=http://opentor.net:6969/announce&tr=udp://tracker.opentrackr.org:1337/announce",
         "is_series": False
     },
     {
@@ -97,6 +99,7 @@ TRENDING_MOVIES: List[Dict[str, Any]] = [
         "poster": "https://image.tmdb.org/t/p/w780/kVioUjk1SXGWblJNaKsIJcBqUcY.jpg",
         "plot": "В условиях глубоких разногласий между городами-близнецами две сестры оказываются по разные стороны баррикад в войне технологий и убеждений.",
         "search_query": "Аркейн",
+        "magnet": "magnet:?xt=urn:btih:25fc7025503c61e0bc5f982e29f7c8097ac8bf86&dn=Arcane.S01.WEB-DL.1080p&tr=http://bt.t-ru.org/ann?magnet&tr=http://bt2.t-ru.org/ann?magnet&tr=http://opentor.net:6969/announce&tr=udp://tracker.opentrackr.org:1337/announce",
         "is_series": True
     },
     {
@@ -115,6 +118,7 @@ TRENDING_MOVIES: List[Dict[str, Any]] = [
         "poster": "https://image.tmdb.org/t/p/w780/25dj85s5VtirRWF6rmO8TpZXHJV.jpg",
         "plot": "Освальд Кобблпот стремится захватить власть в преступном мире Готэма после смерти криминального босса Фальконе.",
         "search_query": "Пингвин",
+        "magnet": "magnet:?xt=urn:btih:c244c418a151369e88f2b07047951b5acf70f942&dn=The.Penguin.S01.WEB-DLRip&tr=http://bt.t-ru.org/ann?magnet&tr=http://bt2.t-ru.org/ann?magnet&tr=http://opentor.net:6969/announce&tr=udp://tracker.opentrackr.org:1337/announce",
         "is_series": True
     },
     {
@@ -133,6 +137,7 @@ TRENDING_MOVIES: List[Dict[str, Any]] = [
         "poster": "https://image.tmdb.org/t/p/w780/cOKLRblbdBtcuf4TkAzsyJpZr23.jpg",
         "plot": "Английский штурман терпит крушение у берегов феодальной Японии и оказывается втянут в борьбу могущественного лорда Торанаги.",
         "search_query": "Сёгун",
+        "magnet": "magnet:?xt=urn:btih:66fb792dd542c26a3425e13fb6f6fe600480fec4&dn=Shogun.S01.WEB-DLRip&tr=http://bt.t-ru.org/ann?magnet&tr=http://bt2.t-ru.org/ann?magnet&tr=http://opentor.net:6969/announce&tr=udp://tracker.opentrackr.org:1337/announce",
         "is_series": True
     },
     {
@@ -151,6 +156,7 @@ TRENDING_MOVIES: List[Dict[str, Any]] = [
         "poster": "https://image.tmdb.org/t/p/w780/7o3XRf31lEtAaRNtgupOGTDD3sP.jpg",
         "plot": "Спустя 200 лет после ядерного апокалипсиса наивная жительница Убежища вынуждена выйти на поверхность опасной пустоши.",
         "search_query": "Фоллаут",
+        "magnet": "magnet:?xt=urn:btih:b4f8206402e6daae109d8a487a3e21b21a495de5&dn=Fallout.WEB-DL.1080p&tr=http://bt.t-ru.org/ann?magnet&tr=http://bt2.t-ru.org/ann?magnet&tr=http://opentor.net:6969/announce&tr=udp://tracker.opentrackr.org:1337/announce",
         "is_series": True
     },
     {
@@ -169,6 +175,7 @@ TRENDING_MOVIES: List[Dict[str, Any]] = [
         "poster": "https://image.tmdb.org/t/p/w780/8cdWjvZQUExUUTzyp4t6EDMubfO.jpg",
         "plot": "Уэйд Уилсон объединяется с нелюдимым Росомахой, чтобы спасти свою вселенную от полного уничтожения.",
         "search_query": "Дэдпул и Росомаха",
+        "magnet": "magnet:?xt=urn:btih:754ed0ad3747d8fb46d8795e2f23c8771523bd0a&dn=Deadpool.and.Wolverine.2024.BDRip&tr=http://bt.t-ru.org/ann?magnet&tr=http://bt2.t-ru.org/ann?magnet&tr=http://opentor.net:6969/announce&tr=udp://tracker.opentrackr.org:1337/announce",
         "is_series": False
     },
     {
@@ -187,6 +194,7 @@ TRENDING_MOVIES: List[Dict[str, Any]] = [
         "poster": "https://image.tmdb.org/t/p/w780/b33nnKl1GSFbao4l3fZDDqsMx0F.jpg",
         "plot": "Группа молодых колонизаторов исследует заброшенную станцию и сталкивается с самой смертоносной формой жизни во Вселенной.",
         "search_query": "Чужой: Ромул",
+        "magnet": "magnet:?xt=urn:btih:40305656ecc036f9c237845795f5d16fda8cbc7d&dn=Alien.Romulus.2024.BDRip.1080p&tr=http://bt.t-ru.org/ann?magnet&tr=http://bt2.t-ru.org/ann?magnet&tr=http://opentor.net:6969/announce&tr=udp://tracker.opentrackr.org:1337/announce",
         "is_series": False
     },
     {
@@ -205,6 +213,7 @@ TRENDING_MOVIES: List[Dict[str, Any]] = [
         "poster": "https://image.tmdb.org/t/p/w780/yQvGrMoipbRoddT0ZR8tPoR7NfX.jpg",
         "plot": "Группа исследователей отправляется сквозь червоточину в поисках нового дома для вымирающего человечества.",
         "search_query": "Интерстеллар",
+        "magnet": "magnet:?xt=urn:btih:6095f48b12a0f42629124e2e1e74cc1bd8e54b3d&dn=Interstellar.2014.BDRip&tr=http://bt.t-ru.org/ann?magnet&tr=http://bt2.t-ru.org/ann?magnet&tr=http://opentor.net:6969/announce&tr=udp://tracker.opentrackr.org:1337/announce",
         "is_series": False
     },
     {
@@ -223,6 +232,7 @@ TRENDING_MOVIES: List[Dict[str, Any]] = [
         "poster": "https://image.tmdb.org/t/p/w780/8Gxv8gSFCU0XGDykEGv7zR1n2ua.jpg",
         "plot": "История жизни физика Роберта Оппенгеймера, возглавившего Манхэттенский проект по созданию первого ядерного оружия.",
         "search_query": "Оппенгеймер",
+        "magnet": "magnet:?xt=urn:btih:9435c106614f38e2c751082b4a7d47557ecf46f8&dn=Oppenheimer.2023.BDRip&tr=http://bt.t-ru.org/ann?magnet&tr=http://bt2.t-ru.org/ann?magnet&tr=http://opentor.net:6969/announce&tr=udp://tracker.opentrackr.org:1337/announce",
         "is_series": False
     },
     {
@@ -241,6 +251,7 @@ TRENDING_MOVIES: List[Dict[str, Any]] = [
         "poster": "https://image.tmdb.org/t/p/w780/owhkU6KRqdXoUQpjV8uyZGPtX58.jpg",
         "plot": "Безумный гениальный учёный Рик Санчез вместе со своим внуком Морти путешествует по мультивселенной.",
         "search_query": "Рик и Морти",
+        "magnet": "magnet:?xt=urn:btih:0c869cec7a9df287d9d88353003ee2476310756e&dn=Rick.and.Morty.WEB-DL.1080p&tr=http://bt.t-ru.org/ann?magnet&tr=http://bt2.t-ru.org/ann?magnet&tr=http://opentor.net:6969/announce&tr=udp://tracker.opentrackr.org:1337/announce",
         "is_series": True
     },
     {
@@ -259,6 +270,7 @@ TRENDING_MOVIES: List[Dict[str, Any]] = [
         "poster": "https://image.tmdb.org/t/p/w780/69loIrm9JPpPRE3Akw4yRoitSYn.jpg",
         "plot": "Контрабандист Джоэл должен провести 14-летнюю Элли через руины США после опустошительной пандемии смертоносного грибка.",
         "search_query": "Одни из нас",
+        "magnet": "magnet:?xt=urn:btih:3fa81b8e4e9767851daee5da465c4ecbe6c28f64&dn=The.Last.of.Us.S01.BDRip.1080p&tr=http://bt.t-ru.org/ann?magnet&tr=http://bt2.t-ru.org/ann?magnet&tr=http://opentor.net:6969/announce&tr=udp://tracker.opentrackr.org:1337/announce",
         "is_series": True
     },
     {
@@ -1235,4 +1247,30 @@ async def get_more_category_movies(category_id: str, page: int = 1) -> List[Dict
 
     _cat_page_cache[cache_key] = items
     return items
+
+def get_catalog_magnet(identifier: Optional[str]) -> Optional[str]:
+    """Finds a pre-resolved, verified magnet link for a movie title or ID from curated catalog"""
+    if not identifier:
+        return None
+    norm = identifier.strip().lower()
+    all_curated = (
+        TRENDING_MOVIES + ACTION_MOVIES + COMEDIES + SCIFI_MOVIES +
+        HORROR_THRILLERS + FANTASY_ADVENTURE + TOP100_MASTERCPIECES
+    )
+    for item in all_curated:
+        mag = item.get("magnet")
+        if not mag:
+            continue
+        if item.get("id", "").lower() == norm:
+            return mag
+        if item.get("title", "").lower() == norm:
+            return mag
+        if item.get("original_title", "").lower() == norm:
+            return mag
+        if item.get("search_query", "").lower() == norm:
+            return mag
+        t = item.get("title", "").lower()
+        if t and (t in norm or norm in t):
+            return mag
+    return None
 

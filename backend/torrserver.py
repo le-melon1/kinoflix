@@ -223,6 +223,7 @@ def probe_media_tracks(torrent_hash: str, index: int = 1) -> Dict[str, Any]:
                 ffprobe_bin = cand
                 break
 
+    media_url = f"{TORRSERVER_URL}/stream/{urllib.parse.quote(filename or 'video.mp4')}?link={torrent_hash}&index={index}&play"
     cmd = [
         ffprobe_bin,
         "-v", "quiet",
@@ -231,7 +232,7 @@ def probe_media_tracks(torrent_hash: str, index: int = 1) -> Dict[str, Any]:
         "-show_format",
         "-probesize", "1500000",
         "-analyzeduration", "1500000",
-        url
+        media_url
     ]
     try:
         res = subprocess.check_output(cmd, timeout=4.0)
@@ -402,7 +403,9 @@ class TorrServerManager:
             "--port", str(TORRSERVER_PORT),
             "--path", TORRSERVER_DIR
         ]
-        if self.physical_ip and self.physical_ip not in ("127.0.0.1", "0.0.0.0"):
+        # Only bind to a specific physical IP if VPN is active on macOS (to bypass VPN tunnel).
+        # On Windows or without VPN, TorrServer must listen on 0.0.0.0 for full UPnP/DHT support.
+        if sys.platform == "darwin" and vpn_on and self.physical_ip and self.physical_ip not in ("127.0.0.1", "0.0.0.0"):
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as _s:
                     _s.bind((self.physical_ip, 0))
@@ -446,6 +449,13 @@ class TorrServerManager:
         """Apply high-speed peer and buffer settings strictly bypassing VPN"""
         try:
             trackers_str = "\n".join([
+                "http://bt.t-ru.org/ann?magnet",
+                "http://bt2.t-ru.org/ann?magnet",
+                "http://bt3.t-ru.org/ann?magnet",
+                "http://bt4.t-ru.org/ann?magnet",
+                "http://retracker.local/announce",
+                "http://opentor.net:6969/announce",
+                "udp://opentor.net:6969",
                 "udp://tracker.opentrackr.org:1337/announce",
                 "udp://open.stealth.si:80/announce",
                 "udp://tracker.openbittorrent.com:6969/announce",
@@ -453,9 +463,7 @@ class TorrServerManager:
                 "udp://explodie.org:6969/announce",
                 "udp://tracker.cyberia.is:6969/announce",
                 "udp://tracker.dler.org:6969/announce",
-                "udp://tracker.tiny-vps.com:6969/announce",
-                "udp://opentor.net:6969",
-                "http://retracker.local/announce"
+                "udp://tracker.tiny-vps.com:6969/announce"
             ])
             cache_bytes = int(getattr(self, "cache_size_mb", 256)) * 1024 * 1024
             down_limit = getattr(self, "download_limit_kb", 0)
@@ -514,16 +522,8 @@ class TorrServerManager:
 
         effective_link = link
         if effective_link.startswith("magnet:?"):
-            public_trackers = [
-                "udp://tracker.opentrackr.org:1337/announce",
-                "udp://open.stealth.si:80/announce",
-                "udp://tracker.openbittorrent.com:6969/announce",
-                "udp://tracker.torrent.eu.org:451/announce",
-                "udp://explodie.org:6969/announce",
-                "udp://opentor.net:6969",
-                "http://retracker.local/announce"
-            ]
-            for tr in public_trackers:
+            from backend.rutor import RUSSIAN_PUBLIC_TRACKERS
+            for tr in RUSSIAN_PUBLIC_TRACKERS:
                 if tr not in effective_link:
                     effective_link += f"&tr={tr}"
 
@@ -539,9 +539,10 @@ class TorrServerManager:
             torrent_hash = data.get("hash")
             self.active_hash = torrent_hash
 
-            # Poll for torrent metadata (file list) with non-blocking async sleep (up to 15s)
+            # Poll for torrent metadata (file list) with non-blocking async sleep (up to 20s)
             file_stats = None
-            for _ in range(25):
+            itorrents_attempted = False
+            for i in range(40):
                 await asyncio.sleep(0.5)
                 try:
                     get_res = await client.post(f"{TORRSERVER_URL}/torrents", json={"action": "get", "hash": torrent_hash}, timeout=3.0)
@@ -551,6 +552,24 @@ class TorrServerManager:
                         break
                 except Exception:
                     pass
+
+                # If after 3.5s metadata is still missing, attempt fetching cached .torrent file
+                if not file_stats and not itorrents_attempted and i >= 7 and torrent_hash:
+                    itorrents_attempted = True
+                    try:
+                        import base64
+                        itorr_url = f"https://itorrents.org/torrent/{torrent_hash}.torrent"
+                        r_torr = await client.get(itorr_url, headers={"User-Agent": "Mozilla/5.0"}, follow_redirects=True, timeout=4.0)
+                        if r_torr.status_code == 200 and len(r_torr.content) > 50:
+                            b64 = base64.b64encode(r_torr.content).decode("ascii")
+                            await client.post(f"{TORRSERVER_URL}/torrents", json={
+                                "action": "add",
+                                "link": f"data:application/x-bittorrent;base64,{b64}",
+                                "title": title,
+                                "save_to_db": False
+                            }, timeout=3.0)
+                    except Exception:
+                        pass
 
             video_exts = (".mkv", ".mp4", ".avi", ".webm", ".ts", ".m2ts", ".mov")
             file_list = []

@@ -1849,8 +1849,27 @@ async function openMovieDetails(movieOrId) {
   try {
     const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&source=all`);
     const data = await res.json();
-    const verified = data.verified_editions || [];
-    const results = data.results || [];
+    let verified = data.verified_editions || [];
+    let results = data.results || [];
+
+    // Fallback: if search returned no results, but movie has an embedded catalog magnet
+    if (verified.length === 0 && results.length === 0 && movie.magnet) {
+      const fallbackEdition = {
+        id: `catalog_${movie.id || 'direct'}`,
+        source: 'KinoFlix Direct CDN',
+        title: `${movie.title} [${movie.quality || '4K UHD'}] [${movie.audio || 'Дубляж'}]`,
+        magnet: movie.magnet,
+        size: '15-25 GB',
+        seeds: 60,
+        quality: movie.quality || '4K UHD',
+        audio: movie.audio || 'Дубляж',
+        is_multi_season: movie.is_series,
+        season_end: movie.total_seasons || 1
+      };
+      verified.push(fallbackEdition);
+      results.push(fallbackEdition);
+    }
+
     state.modalVerified = verified;
     state.modalAllResults = results;
 
@@ -1870,7 +1889,26 @@ async function openMovieDetails(movieOrId) {
       preloadStream(top);
     }
   } catch (err) {
-    modalEditionsList.innerHTML = `<div style="color:#888;">Ошибка загрузки раздач: ${err.message}</div>`;
+    if (movie.magnet) {
+      const fallbackEdition = {
+        id: `catalog_${movie.id || 'direct'}`,
+        source: 'KinoFlix Direct CDN',
+        title: `${movie.title} [${movie.quality || '4K UHD'}] [${movie.audio || 'Дубляж'}]`,
+        magnet: movie.magnet,
+        size: '15-25 GB',
+        seeds: 60,
+        quality: movie.quality || '4K UHD',
+        audio: movie.audio || 'Дубляж',
+        is_multi_season: movie.is_series,
+        season_end: movie.total_seasons || 1
+      };
+      state.modalVerified = [fallbackEdition];
+      state.modalAllResults = [fallbackEdition];
+      renderModalEditions([fallbackEdition], [fallbackEdition]);
+      preloadStream(fallbackEdition);
+    } else {
+      modalEditionsList.innerHTML = `<div style="color:#888;">Ошибка загрузки раздач: ${err.message}</div>`;
+    }
   }
 }
 

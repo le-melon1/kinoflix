@@ -3,18 +3,54 @@ import urllib.parse
 from typing import List, Dict, Any, Optional
 import httpx
 
-RUTOR_MIRRORS = [
-    "http://rutor.info",
-    "https://rutor.info",
-    "http://rutor.is",
-    "https://rutor.is"
+RUTOR_ENDPOINTS = [
+    {"url": "http://193.46.255.29", "host": "rutor.info"},
+    {"url": "http://193.46.255.26", "host": "rutor.is"},
+    {"url": "http://rutor.info", "host": None},
+    {"url": "http://rutor.is", "host": None},
+    {"url": "https://rutor.info", "host": None},
+    {"url": "https://rutor.is", "host": None},
+]
+
+RUSSIAN_PUBLIC_TRACKERS = [
+    "http://bt.t-ru.org/ann?magnet",
+    "http://bt2.t-ru.org/ann?magnet",
+    "http://bt3.t-ru.org/ann?magnet",
+    "http://bt4.t-ru.org/ann?magnet",
+    "http://retracker.local/announce",
+    "http://opentor.net:6969/announce",
+    "udp://opentor.net:6969",
+    "udp://tracker.opentrackr.org:1337/announce",
+    "udp://open.stealth.si:80/announce",
+    "udp://tracker.openbittorrent.com:6969/announce",
+    "udp://tracker.torrent.eu.org:451/announce",
+    "udp://explodie.org:6969/announce",
+    "udp://tracker.cyberia.is:6969/announce",
+    "udp://tracker.dler.org:6969/announce",
+    "udp://tracker.tiny-vps.com:6969/announce"
 ]
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
 }
+
+def enrich_magnet_trackers(magnet: str) -> str:
+    """Appends reliable Russian HTTP and UDP announce trackers to any magnet link"""
+    if not magnet or not magnet.startswith("magnet:?"):
+        return magnet
+    for tr in RUSSIAN_PUBLIC_TRACKERS:
+        if tr not in magnet:
+            magnet += f"&tr={tr}"
+    return magnet
+
+def format_bytes_size(size_bytes: int) -> str:
+    if size_bytes >= 1024 * 1024 * 1024:
+        return f"{round(size_bytes / (1024 * 1024 * 1024), 2)} GB"
+    elif size_bytes >= 1024 * 1024:
+        return f"{round(size_bytes / (1024 * 1024), 1)} MB"
+    return f"{size_bytes} B"
 
 def parse_quality(title: str) -> str:
     title_upper = title.upper()
@@ -51,20 +87,119 @@ def parse_audio(title: str) -> str:
         audios.append("Субтитры")
     return ", ".join(audios) if audios else "Русский звук"
 
+async def search_torrents_csv(query: str, limit: int = 30, min_seeds: int = 1) -> List[Dict[str, Any]]:
+    """
+    Search Torrents-CSV public API (unblocked global torrent index).
+    Works in Russia without VPN.
+    """
+    results: List[Dict[str, Any]] = []
+    encoded = urllib.parse.quote(query)
+    url = f"https://torrents-csv.com/service/search?q={encoded}"
+    trackers_suffix = "&tr=" + "&tr=".join(RUSSIAN_PUBLIC_TRACKERS)
+
+    try:
+        async with httpx.AsyncClient(timeout=4.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers=HEADERS)
+            if resp.status_code == 200:
+                data = resp.json()
+                for t in data.get("torrents", []):
+                    seeds = int(t.get("seeders") or 0)
+                    if seeds < min_seeds:
+                        continue
+                    ih = (t.get("infohash") or "").lower().strip()
+                    if not ih:
+                        continue
+                    name = t.get("name") or "Video"
+                    magnet = f"magnet:?xt=urn:btih:{ih}&dn={urllib.parse.quote(name)}{trackers_suffix}"
+                    size_b = int(t.get("size_bytes") or 0)
+                    results.append({
+                        "id": f"csv_{ih[:16]}",
+                        "source": "Torrents-CSV",
+                        "title": name,
+                        "magnet": magnet,
+                        "torrent_url": f"https://itorrents.org/torrent/{ih}.torrent",
+                        "size": format_bytes_size(size_b),
+                        "seeds": seeds,
+                        "leeches": int(t.get("leechers") or 0),
+                        "date": "",
+                        "quality": parse_quality(name),
+                        "audio": parse_audio(name),
+                        "details_url": ""
+                    })
+                    if len(results) >= limit:
+                        break
+    except Exception:
+        pass
+    return results
+
+async def search_apibay(query: str, limit: int = 30, min_seeds: int = 1) -> List[Dict[str, Any]]:
+    """
+    Search PirateBay via public apibay.org API.
+    Works in Russia without VPN.
+    """
+    results: List[Dict[str, Any]] = []
+    encoded = urllib.parse.quote(query)
+    url = f"https://apibay.org/q.php?q={encoded}"
+    trackers_suffix = "&tr=" + "&tr=".join(RUSSIAN_PUBLIC_TRACKERS)
+
+    try:
+        async with httpx.AsyncClient(timeout=4.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers=HEADERS)
+            if resp.status_code == 200:
+                data = resp.json()
+                for t in data:
+                    name = t.get("name") or ""
+                    if name == "No results returned":
+                        continue
+                    seeds = int(t.get("seeders") or 0)
+                    if seeds < min_seeds:
+                        continue
+                    ih = (t.get("info_hash") or "").lower().strip()
+                    if not ih or ih == "0000000000000000000000000000000000000000":
+                        continue
+                    magnet = f"magnet:?xt=urn:btih:{ih}&dn={urllib.parse.quote(name)}{trackers_suffix}"
+                    size_b = int(t.get("size") or 0)
+                    results.append({
+                        "id": f"apibay_{ih[:16]}",
+                        "source": "ThePirateBay",
+                        "title": name,
+                        "magnet": magnet,
+                        "torrent_url": f"https://itorrents.org/torrent/{ih}.torrent",
+                        "size": format_bytes_size(size_b),
+                        "seeds": seeds,
+                        "leeches": int(t.get("leechers") or 0),
+                        "date": "",
+                        "quality": parse_quality(name),
+                        "audio": parse_audio(name),
+                        "details_url": ""
+                    })
+                    if len(results) >= limit:
+                        break
+    except Exception:
+        pass
+    return results
+
 async def search_rutor(query: str, limit: int = 40, min_seeds: int = 2) -> List[Dict[str, Any]]:
     """
     Search Rutor sorted strictly by seeders descending.
-    Filters out dead torrents so stream always works.
+    Features direct IP bypass (http://193.46.255.29 with Host: rutor.info) to work in Russia without VPN.
+    Automatically falls back to Torrents-CSV and Apibay if Rutor is inaccessible.
     """
     encoded_query = urllib.parse.quote(query)
     results: List[Dict[str, Any]] = []
 
     async with httpx.AsyncClient(timeout=3.5, follow_redirects=True) as client:
-        for mirror in RUTOR_MIRRORS:
+        for ep in RUTOR_ENDPOINTS:
+            base_url = ep["url"]
+            host_header = ep.get("host")
+            req_headers = dict(HEADERS)
+            if host_header:
+                req_headers["Host"] = host_header
+
             # Formula: /search/0/0/000/2/query sorts by seeds descending
-            url = f"{mirror}/search/0/0/000/2/{encoded_query}"
+            url = f"{base_url}/search/0/0/000/2/{encoded_query}"
             try:
-                resp = await client.get(url, headers=HEADERS)
+                resp = await client.get(url, headers=req_headers)
                 if resp.status_code == 200 and "index" in resp.text:
                     html = resp.text
 
@@ -73,7 +208,8 @@ async def search_rutor(query: str, limit: int = 40, min_seeds: int = 2) -> List[
                         mag_m = re.search(r'href="(magnet:\?xt=[^"]+)"', chunk)
                         if not mag_m:
                             continue
-                        magnet = mag_m.group(1)
+                        raw_magnet = mag_m.group(1)
+                        magnet = enrich_magnet_trackers(raw_magnet)
 
                         title_m = re.search(r'<a href="/torrent/(\d+)/[^"]*">([^<]+)</a>', chunk)
                         if not title_m:
@@ -118,14 +254,14 @@ async def search_rutor(query: str, limit: int = 40, min_seeds: int = 2) -> List[
                             "source": "Rutor",
                             "title": full_title,
                             "magnet": magnet,
-                            "torrent_url": f"{mirror}/download/{torrent_id}",
+                            "torrent_url": f"http://rutor.info/download/{torrent_id}",
                             "size": size_str,
                             "seeds": seeds,
                             "leeches": leech,
                             "date": date_str,
                             "quality": quality,
                             "audio": audio,
-                            "details_url": f"{mirror}/torrent/{torrent_id}"
+                            "details_url": f"http://rutor.info/torrent/{torrent_id}"
                         })
 
                         if len(results) >= limit:
@@ -133,7 +269,16 @@ async def search_rutor(query: str, limit: int = 40, min_seeds: int = 2) -> List[
 
                     if results:
                         return results
-            except Exception as e:
+            except Exception:
                 continue
+
+    # Fallback to Torrents-CSV and Apibay if Rutor yielded no results
+    if not results:
+        csv_results = await search_torrents_csv(query, limit=limit, min_seeds=min_seeds)
+        if csv_results:
+            results.extend(csv_results)
+        if len(results) < limit:
+            apibay_results = await search_apibay(query, limit=limit - len(results), min_seeds=min_seeds)
+            results.extend(apibay_results)
 
     return results
