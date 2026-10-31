@@ -1,8 +1,10 @@
+.tools/
 .venv/
 __pycache__/
 *.pyc
 *.log
 uvicorn.log
+backend.log
 test_out.mp4
 config.db
 settings.json
@@ -10,3 +12,8 @@ settings.json
 build/
 dist/
 static/icons/icon.iconset/
+bin/*.exe
+*.exe
+push_to_github.bat
+
+.img_cache/
