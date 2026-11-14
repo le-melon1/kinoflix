@@ -68,18 +68,11 @@ def _patched_getaddrinfo(host, port, *args, **kwargs):
 
     return _orig_getaddrinfo(host, port, *args, **kwargs)
 
-socket.getaddrinfo = _patched_getaddrinfo
+ # Use system DNS and VPN routing.
 
 def get_direct_client(timeout: float = 5.0) -> httpx.AsyncClient:
-    """Creates an httpx client strictly bound to the physical network adapter, bypassing any active VPN or broken proxy"""
-    try:
-        from backend.torrserver import get_physical_net_info
-        _, phys_ip, _ = get_physical_net_info()
-        local_addr = phys_ip if (phys_ip and phys_ip != "127.0.0.1") else None
-    except Exception:
-        local_addr = None
-    transport = httpx.AsyncHTTPTransport(local_address=local_addr) if local_addr else None
-    return httpx.AsyncClient(transport=transport, trust_env=False, timeout=timeout, follow_redirects=True)
+    """Use the operating system network route, including an active VPN."""
+    return httpx.AsyncClient(timeout=timeout, follow_redirects=True)
 
 OMDB_KEYS = ["trilogy", "70252528", "thewdb", "b7da8d63"]
 
