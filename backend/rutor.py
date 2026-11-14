@@ -4,13 +4,10 @@ import urllib.parse
 from typing import List, Dict, Any, Optional
 import httpx
 
-RUTOR_ENDPOINTS = [
-    {"url": "http://193.46.255.29", "host": "rutor.info"},
-    {"url": "http://193.46.255.26", "host": "rutor.is"},
-    {"url": "http://rutor.info", "host": None},
-    {"url": "http://rutor.is", "host": None},
-    {"url": "https://rutor.info", "host": None},
-    {"url": "https://rutor.is", "host": None},
+RUTOR_MIRRORS = [
+    "http://rutor.info",
+    "http://rutor.is",
+    "https://rutor.is"
 ]
 
 RUSSIAN_PUBLIC_TRACKERS = [
@@ -95,15 +92,16 @@ def is_non_video_release(name: str) -> bool:
 async def search_torrents_csv(query: str, limit: int = 30, min_seeds: int = 1) -> List[Dict[str, Any]]:
     """
     Search Torrents-CSV public API (unblocked global torrent index).
-    Works in Russia without VPN.
+    Works in Russia without VPN via physical adapter binding.
     """
+    from backend.metadata import get_direct_client
     results: List[Dict[str, Any]] = []
     encoded = urllib.parse.quote(query)
     url = f"https://torrents-csv.com/service/search?q={encoded}"
     trackers_suffix = "&tr=" + "&tr=".join(RUSSIAN_PUBLIC_TRACKERS)
 
     try:
-        async with httpx.AsyncClient(timeout=4.0, follow_redirects=True) as client:
+        async with get_direct_client(timeout=3.5) as client:
             resp = await client.get(url, headers=HEADERS)
             if resp.status_code == 200:
                 data = resp.json()
@@ -120,7 +118,7 @@ async def search_torrents_csv(query: str, limit: int = 30, min_seeds: int = 1) -
                     magnet = f"magnet:?xt=urn:btih:{ih}&dn={urllib.parse.quote(name)}{trackers_suffix}"
                     size_b = int(t.get("size_bytes") or 0)
                     results.append({
-                        "id": f"csv_{ih[:16]}",
+                        "id": f"tcsv_{ih[:16]}",
                         "source": "Torrents-CSV",
                         "title": name,
                         "magnet": magnet,
@@ -144,13 +142,14 @@ async def search_apibay(query: str, limit: int = 30, min_seeds: int = 1) -> List
     Search PirateBay via public apibay.org API.
     Works in Russia without VPN.
     """
+    from backend.metadata import get_direct_client
     results: List[Dict[str, Any]] = []
     encoded = urllib.parse.quote(query)
     url = f"https://apibay.org/q.php?q={encoded}"
     trackers_suffix = "&tr=" + "&tr=".join(RUSSIAN_PUBLIC_TRACKERS)
 
     try:
-        async with httpx.AsyncClient(timeout=4.0, follow_redirects=True) as client:
+        async with get_direct_client(timeout=3.5) as client:
             resp = await client.get(url, headers=HEADERS)
             if resp.status_code == 200:
                 data = resp.json()
@@ -195,7 +194,8 @@ async def search_rutor(query: str, limit: int = 40, min_seeds: int = 2) -> List[
     encoded_query = urllib.parse.quote(query)
     results: List[Dict[str, Any]] = []
 
-    async with httpx.AsyncClient(timeout=3.5, follow_redirects=True) as client:
+    from backend.metadata import get_direct_client
+    async with get_direct_client(timeout=3.5) as client:
         async def fetch_endpoint(ep):
             headers = dict(HEADERS)
             if ep.get("host"):
@@ -208,7 +208,7 @@ async def search_rutor(query: str, limit: int = 40, min_seeds: int = 2) -> List[
         # Query mirrors and independent indexes together, rather than adding
         # their timeouts one after another.
         responses, csv_results, apibay_results = await asyncio.gather(
-            asyncio.gather(*(fetch_endpoint(ep) for ep in RUTOR_ENDPOINTS)),
+            asyncio.gather(*(fetch_endpoint({"url": mirror}) for mirror in RUTOR_MIRRORS)),
             search_torrents_csv(query, limit=limit, min_seeds=min_seeds),
             search_apibay(query, limit=limit, min_seeds=min_seeds),
         )
