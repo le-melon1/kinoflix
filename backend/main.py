@@ -89,6 +89,10 @@ def startup_event():
 async def shutdown_event():
     torrserver_mgr.stop()
 
+@app.get("/api/health")
+async def health_check():
+    return {"status": "ok", "app": "KinoFlix", "version": "1.0.0"}
+
 @app.get("/api/network/status")
 async def get_network_status():
     from backend.torrserver import get_physical_net_info, is_vpn_active
