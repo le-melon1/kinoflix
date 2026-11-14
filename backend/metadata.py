@@ -1,4 +1,5 @@
 import re
+import asyncio
 import urllib.parse
 from typing import Optional, Dict, Any, List
 import httpx
@@ -39,6 +40,11 @@ def extract_movie_names(torrent_title: str) -> Dict[str, Optional[str]]:
             "year": m2.group(2).strip()
         }
 
+    # Common index filenames use dots instead of spaces and omit parentheses.
+    dotted = re.match(r"^(.+?)[. _-]+((?:19|20)\d{2})(?:[. _-]|$)", torrent_title)
+    if dotted:
+        return {"ru_title": dotted.group(1).replace(".", " ").strip(), "en_title": None, "year": dotted.group(2)}
+
     return {"ru_title": torrent_title.split('/')[0].strip(), "en_title": None, "year": None}
 
 def extract_season_info(title: str):
@@ -67,7 +73,7 @@ def extract_torrent_year(title: str) -> Optional[str]:
     Extracts release year or year range like (2024) or (2021-2024) from torrent title.
     """
     m = re.search(r'\((\d{4}(?:\s*[-–]\s*\d{4})?)\)', title)
-    return m.group(1).strip() if m else None
+    return m.group(1).strip() if m else extract_movie_names(title).get("year")
 
 async def fetch_movie_metadata(query: str, results: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
     """
@@ -104,7 +110,7 @@ async def fetch_movie_metadata(query: str, results: Optional[List[Dict[str, Any]
             r = await client.get(tmdb_url)
             if r.status_code == 200:
                 tdata = r.json()
-                tresults = tdata.get("results", [])
+                tresults = [r for r in tdata.get("results", []) if r.get("media_type") in ("movie", "tv")]
                 if tresults:
                     top_tmdb = tresults[0]
                     p_path = top_tmdb.get("poster_path")
@@ -227,19 +233,13 @@ async def enrich_search_results(results: List[Dict[str, Any]]) -> List[Dict[str,
     lookup_map: Dict[str, Optional[Dict[str, Any]]] = {}
 
     async with httpx.AsyncClient(timeout=3.5) as client:
-        for item in results[:24]:
-            parsed = extract_movie_names(item.get("title", ""))
-            query_key = (parsed.get("en_title") or parsed.get("ru_title") or "").strip().lower()
-            if not query_key or query_key in lookup_map:
-                continue
-
-            lookup_term = parsed.get("en_title") or parsed.get("ru_title")
+        async def lookup(query_key, lookup_term, parsed):
             try:
                 tmdb_url = f"https://api.themoviedb.org/3/search/multi?api_key=1cf50e6248dc270629e802686245c2c8&query={urllib.parse.quote(lookup_term)}&language=ru-RU"
                 r = await client.get(tmdb_url)
                 if r.status_code == 200:
                     tdata = r.json()
-                    tresults = tdata.get("results", [])
+                    tresults = [r for r in tdata.get("results", []) if r.get("media_type") in ("movie", "tv")]
                     if tresults:
                         chosen = tresults[0]
                         yr = parsed.get("year")
@@ -254,7 +254,7 @@ async def enrich_search_results(results: List[Dict[str, Any]]) -> List[Dict[str,
                         b_path = chosen.get("backdrop_path")
                         m_title = chosen.get("title") or chosen.get("name") or parsed.get("ru_title")
                         rel_date = chosen.get("release_date") or chosen.get("first_air_date") or ""
-                        year_val = rel_date[:4] if len(rel_date) >= 4 else (parsed.get("year") or "2024")
+                        year_val = rel_date[:4] if len(rel_date) >= 4 else (parsed.get("year") or "")
 
                         poster_url = tmdb_img_mirror(f"https://image.tmdb.org/t/p/w780{p_path}") if p_path else None
                         backdrop_url = tmdb_img_mirror(f"https://image.tmdb.org/t/p/w1280{b_path}") if b_path else poster_url
@@ -275,6 +275,17 @@ async def enrich_search_results(results: List[Dict[str, Any]]) -> List[Dict[str,
             except Exception:
                 lookup_map[query_key] = None
 
+
+        requests = []
+        for item in results[:24]:
+            parsed = extract_movie_names(item.get("title", ""))
+            query_key = (parsed.get("en_title") or parsed.get("ru_title") or "").strip().lower()
+            if not query_key or query_key in lookup_map:
+                continue
+            lookup_map[query_key] = None
+            requests.append(lookup(query_key, parsed.get("en_title") or parsed.get("ru_title"), parsed))
+        await asyncio.gather(*requests)
+
     # Apply lookups to results
     for item in results:
         t_raw = item.get("title", "")
@@ -293,11 +304,11 @@ async def enrich_search_results(results: List[Dict[str, Any]]) -> List[Dict[str,
 
         if s_label:
             item["display_title"] = f"{base_title} • {s_label}"
-            item["display_year"] = t_year or (meta["display_year"] if meta else "2024")
+            item["display_year"] = t_year or (meta["display_year"] if meta else "")
             item["is_series"] = True
         else:
             item["display_title"] = base_title
-            item["display_year"] = t_year or (meta["display_year"] if meta else (parsed.get("year") or "2024"))
+            item["display_year"] = t_year or (meta["display_year"] if meta else (parsed.get("year") or ""))
             item["is_series"] = (meta.get("media_type") == "tv") if meta else False
 
         if meta:
@@ -336,7 +347,7 @@ async def resolve_movie_online(query: str) -> Dict[str, Any]:
             r = await client.get(tmdb_url)
             if r.status_code == 200:
                 data = r.json()
-                results = data.get("results", [])
+                results = [r for r in data.get("results", []) if r.get("media_type") in ("movie", "tv")]
                 if results:
                     top = results[0]
                     ru_title = top.get("title") or top.get("name") or clean
@@ -434,17 +445,17 @@ def curate_verified_editions(
         seeds = item_copy.get("seeds", 0)
         item_copy["curated_badge"] = badge
         item_copy["curated_category"] = category_name
-        item_copy["curated_desc"] = f"{desc} • Раздают: {seeds} чел."
+        item_copy["curated_desc"] = f"Качество: {item_copy.get('quality') or 'неизвестно'} • Озвучка: {item_copy.get('audio') or 'неизвестна'} • Сидов: {seeds}"
         item_copy["uploader_rating"] = stars
 
         if seeds >= 50:
-            health = f"🔥 99% надёжность • {seeds} сидов (Моментальный запуск)"
+            health = f"🔥 {seeds} сидов"
             health_color = "green"
         elif seeds >= 15:
-            health = f"🟢 95% надёжность • {seeds} сидов (Отличная скорость)"
+            health = f"🟢 {seeds} сидов"
             health_color = "green"
         elif seeds >= 5:
-            health = f"🟡 Хорошая скорость • {seeds} сидов"
+            health = f"🟡 {seeds} сидов"
             health_color = "yellow"
         else:
             health = f"🟠 {seeds} сидов (Возможна буферизация)"
@@ -548,7 +559,7 @@ def curate_verified_editions(
         if best_4k and r["id"] == best_4k["id"]:
             continue
         t_up = r["title"].upper()
-        if "1080P" in t_up or "BDRIP" in t_up:
+        if "1080P" in t_up:
             if not best_1080p or r.get("seeds", 0) > best_1080p.get("seeds", 0):
                 best_1080p = r
 

@@ -36,6 +36,14 @@ const state = {
   pendingNextFile: null,
   currentSource: 'all',
   searchTimeout: null,
+  searchController: null,
+  searchSequence: 0,
+  preloadPromise: null,
+  playbackSequence: 0,
+  fallbackTimer: null,
+  fallbackEnabled: false,
+  fallbackInFlight: false,
+  attemptedReleases: [],
   controlsTimeout: null,
   statsInterval: null,
   rutrackerLoggedIn: false,
@@ -200,13 +208,22 @@ function sanitizeImgUrl(url) {
 }
 
 function handleCardImgError(img) {
-  if (!img || img._fallbackApplied) return;
-  img._fallbackApplied = true;
+  if (!img) return;
+  // Retry TMDB artwork through the server, which tries both mirror and origin.
+  if (!img._proxyAttempted) {
+    img._proxyAttempted = true;
+    try {
+      const current = new URL(img.currentSrc || img.src, window.location.href);
+      const original = current.hostname === 'wsrv.nl' ? current.searchParams.get('url') : current.href;
+      const normalized = original && (original.startsWith('http') ? original : 'https://' + original);
+      if (normalized && new URL(normalized).hostname === 'image.tmdb.org') {
+        img.src = `/api/image-proxy?url=${encodeURIComponent(normalized)}`;
+        return;
+      }
+    } catch (_) {}
+  }
   img.onerror = null;
-  const title = img.getAttribute('data-title') || 'KinoFlix';
-  const year = img.getAttribute('data-year') || '2024';
-  const quality = img.getAttribute('data-quality') || 'HD';
-  img.src = generateCardSvg(title, year, quality);
+  img.src = generateCardSvg(img.getAttribute('data-title') || 'KinoFlix', img.getAttribute('data-year') || '', img.getAttribute('data-quality') || '');
 }
 
 function registerCatalogItem(item) {
@@ -220,7 +237,7 @@ function registerCatalogItem(item) {
 
 function generateCardSvg(title, year, quality) {
   const t = escapeXml((title || 'KinoFlix').slice(0, 32));
-  const y = escapeXml(year || '2024');
+  const y = escapeXml(year || '');
   const q = escapeXml(quality || '4K UHD');
   let hash = 0;
   for (let i = 0; i < t.length; i++) hash = t.charCodeAt(i) + ((hash << 5) - hash);
@@ -250,7 +267,7 @@ function generateCardSvg(title, year, quality) {
     <rect x="14" y="14" width="56" height="20" rx="4" fill="url(#glow)"/>
     <text x="42" y="28" fill="#ffffff" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="10" font-weight="900" text-anchor="middle" letter-spacing="0.5">${q}</text>
     <text x="150" y="116" fill="#ffffff" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="14" font-weight="800" text-anchor="middle">${t}</text>
-    <text x="150" y="138" fill="rgba(255,255,255,0.7)" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="11" font-weight="600" text-anchor="middle">★ 8.5 • ${y} • KinoFlix</text>
+    <text x="150" y="138" fill="rgba(255,255,255,0.7)" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="11" font-weight="600" text-anchor="middle">${y ? y + ' • ' : ''}KinoFlix</text>
   </svg>`;
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
@@ -825,11 +842,72 @@ function setupScrollHeader() {
   });
 }
 
+// Recommendations are local to this browser: favorite and watched titles inform
+// the genre mix; previously displayed titles are rotated on the next visit.
+function buildHomeRecommendations(categories, extraItems, favorites, history, previousIds, random = Math.random) {
+  const liked = new Set([...favorites, ...history].flatMap(x => [x.id, x.title, x.item?.id, x.item?.title]).filter(Boolean).map(x => String(x).toLocaleLowerCase().trim()));
+  const excluded = new Set(liked);
+  const weights = new Map();
+  for (const cat of categories || []) {
+    if ((cat.items || []).some(x => liked.has(String(x.id || '').toLocaleLowerCase().trim()) || liked.has(String(x.title || '').toLocaleLowerCase().trim()))) weights.set(cat.id, 1);
+  }
+  const candidates = new Map();
+  const add = (item, weight, live = false) => {
+    if (!item || !item.title) return;
+    const key = String(item.title).toLocaleLowerCase().trim() + '|' + (item.year || '');
+    if (excluded.has(String(item.id || '').toLocaleLowerCase().trim()) || excluded.has(String(item.title).toLocaleLowerCase().trim())) return;
+    const old = candidates.get(key);
+    if (!old) candidates.set(key, {item, weight, live});
+    else { old.weight = Math.max(old.weight, weight); old.live ||= live; }
+  };
+  for (const cat of categories || []) for (const item of cat.items || []) add(item, weights.has(cat.id) ? 1 : 0);
+  for (const item of extraItems || []) add(item, 0, true);
+  const previous = new Set(previousIds || []);
+  const scored = [...candidates.values()].map(x => ({...x, score: x.weight * 2 + random() - (previous.has(String(x.item.id || x.item.title)) ? 4 : 0)}))
+    .sort((a,b) => b.score - a.score);
+  const live = scored.filter(x => x.live && !previous.has(String(x.item.id || x.item.title))).slice(0, 3);
+  const selected = new Set(live);
+  return [...live, ...scored.filter(x => !selected.has(x))].slice(0, 12).map(x => x.item);
+}
+
+function updateHomeRecommendations(extraItems = [], previousIds = null) {
+  if (!state.catalog?.categories) return;
+  const categories = state.catalog.categories.filter(c => c.id !== 'for_you');
+  let previous = previousIds;
+  if (!previous) { try { previous = JSON.parse(localStorage.getItem('kinoflix_recommendations_previous') || '[]'); } catch (_) { previous = []; } }
+  const picks = buildHomeRecommendations(categories, extraItems, state.favorites || [], state.continueWatching || [], previous);
+  if (!picks.length) return;
+  state.catalog.categories = [{id:'for_you', title: (state.favorites.length || state.continueWatching.length) ? 'Для вас · по вашим интересам' : 'Что посмотреть сегодня', items:picks}, ...categories];
+  state.catalog.billboard = picks[0];
+  try { localStorage.setItem('kinoflix_recommendations_previous', JSON.stringify(picks.map(x => String(x.id || x.title)))); } catch (_) {}
+}
+
+async function refreshHomeRecommendations(previousIds) {
+  try {
+    const previousPage = Number(localStorage.getItem('kinoflix_trending_page') || 0);
+    const page = previousPage % 3 + 1;
+    localStorage.setItem('kinoflix_trending_page', String(page));
+    const response = await fetch(`/api/catalog/more?category=trending&page=${page}`);
+    if (!response.ok) return;
+    const data = await response.json();
+    if (!data.items?.length) return;
+    updateHomeRecommendations(data.items, previousIds);
+    if (!state.tvMode && state.currentCategory === 'all' && homeView.style.display !== 'none') {
+      renderBillboard(state.catalog.billboard);
+      renderRows(state.catalog.categories);
+    }
+  } catch (_) { /* The local catalog remains available offline. */ }
+}
+
 // --- CATALOG LOADING ---
 async function loadCatalog() {
   try {
     const res = await fetch('/api/catalog');
     state.catalog = await res.json();
+    let previousIds = [];
+    try { previousIds = JSON.parse(localStorage.getItem('kinoflix_recommendations_previous') || '[]'); } catch (_) {}
+    updateHomeRecommendations([], previousIds);
+    refreshHomeRecommendations(previousIds);
 
     if (state.catalog.genres) {
       renderGenreFilterBar(state.catalog.genres);
@@ -884,11 +962,11 @@ function renderBillboard(item) {
   billboardImg.src = sanitizeImgUrl(item.backdrop);
   billboardTitle.textContent = (item.title || '').toUpperCase();
   if (billboardRating) billboardRating.textContent = '★ ' + (item.rating || '8.8');
-  billboardYear.textContent = item.year || '2024';
+  billboardYear.textContent = item.year || '';
   billboardAge.textContent = item.age || '16+';
-  billboardDuration.textContent = item.duration || '2 ч 15 мин';
-  billboardQuality.textContent = item.quality || 'Ultra HD 4K';
-  billboardAudio.textContent = item.audio ? '5.1' : 'Стерео';
+  billboardDuration.textContent = item.duration || '';
+  billboardQuality.textContent = item.quality || '';
+  billboardAudio.textContent = '';
   billboardPlot.textContent = item.plot || '';
   updateBillboardFavButton();
 }
@@ -1075,17 +1153,14 @@ async function loadMoreCategoryItems(catId) {
 
 // --- SEARCH HANDLING ---
 function toggleSearchInput() {
-  const isOpen = searchBox.classList.contains('open');
-  if (!isOpen) {
-    searchBox.classList.add('open');
-    netflixSearchInput.focus();
-  } else if (!netflixSearchInput.value) {
-    searchBox.classList.remove('open');
-  }
+  searchBox.classList.add('open');
+  netflixSearchInput.focus();
 }
 
 function handleSearchInput(query) {
   clearTimeout(state.searchTimeout);
+  if (state.searchController) state.searchController.abort();
+  state.searchSequence++;
   const q = query.trim();
   searchClearBtn.style.display = q ? 'block' : 'none';
 
@@ -1106,6 +1181,9 @@ function clearSearch() {
 }
 
 function goHome() {
+  clearTimeout(state.searchTimeout);
+  if (state.searchController) state.searchController.abort();
+  state.searchSequence++;
   if (state.tvMode) {
     homeView.style.display = 'none';
     searchResultsView.style.display = 'none';
@@ -1120,7 +1198,7 @@ function goHome() {
   if (downloadsView) downloadsView.style.display = 'none';
   if (favoritesView) favoritesView.style.display = 'none';
   if (tvView) tvView.style.display = 'none';
-  searchBox.classList.remove('open');
+  searchBox.classList.add('open');
 }
 
 // --- TOAST NOTIFICATIONS ---
@@ -1717,6 +1795,10 @@ function switchCategory(cat) {
 }
 
 async function performSearch(query) {
+  if (state.searchController) state.searchController.abort();
+  const controller = new AbortController();
+  state.searchController = controller;
+  const sequence = ++state.searchSequence;
   homeView.style.display = 'none';
   searchResultsView.style.display = 'block';
   searchQueryLabel.textContent = `"${query}"`;
@@ -1724,14 +1806,17 @@ async function performSearch(query) {
   searchGrid.innerHTML = '';
 
   try {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&source=${state.currentSource}`);
+    const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&source=${state.currentSource}`, { signal: controller.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
+    if (sequence !== state.searchSequence) return;
     searchLoader.style.display = 'none';
 
     renderSearchResults(data);
   } catch (err) {
+    if (err.name === 'AbortError' || sequence !== state.searchSequence) return;
     searchLoader.style.display = 'none';
-    searchGrid.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding: 40px; color:#888;">Ошибка поиска: ${err.message}</div>`;
+    searchGrid.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding: 40px; color:#888;">Ошибка поиска: ${escapeHtml(err.message)}</div>`;
   }
 }
 
@@ -1755,38 +1840,39 @@ function renderSearchResults(data) {
     return;
   }
 
-  // Render individual release cards with distinct covers and always-visible titles
-  let html = results.map(item => {
-    const itemId = registerCatalogItem(item);
-    const cardTitle = item.display_title || item.title;
-    const cardYear = item.display_year || item.year || '';
-    // Prefer widescreen 16:9 backdrop so there is zero cropping on landscape cards
-    const cardImg = sanitizeImgUrl(item.backdrop || item.poster) || generateCardSvg(cardTitle, cardYear, item.quality || 'HD');
-    return `
-      <div class="grid-card" onclick="openTorrentReleaseModal('${escapeJs(itemId)}')">
-        <div class="grid-card-poster-wrap">
-          <img src="${cardImg}" class="grid-card-poster-img" alt="${escapeHtml(cardTitle)}" data-title="${escapeHtml(cardTitle)}" data-year="${escapeHtml(cardYear)}" data-quality="${escapeHtml(item.quality || 'HD')}" onerror="handleCardImgError(this);">
-          <div class="grid-card-hover-overlay">
-            <div class="grid-play-icon">▶</div>
-          </div>
-          <span class="grid-quality-pill">${escapeHtml(item.quality || 'HD')}</span>
-          ${item.season_label ? `<span class="grid-season-pill">${escapeHtml(item.season_label)}</span>` : ''}
-          <span class="grid-source-pill">${escapeHtml(item.source)}</span>
-          <div class="grid-card-title-bar">${escapeHtml(cardTitle)}${cardYear ? ` (${escapeHtml(cardYear)})` : ''}</div>
-        </div>
-        <div class="grid-card-body">
-          <div class="grid-card-meta">
-            <span style="color:var(--match-green); font-weight:800; background:rgba(70,211,105,0.15); padding:2px 8px; border-radius:4px;">▲ ${item.seeds} сидов</span>
-            <span style="color:#aaa;">💾 ${item.size}</span>
-            <span style="color:#888;">${item.quality || 'HD'}</span>
-          </div>
-          <div class="grid-card-raw-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</div>
-        </div>
-      </div>
-    `;
+  // Group editions of the same film while keeping remakes with different years separate.
+  const groups = new Map();
+  for (const item of results) {
+    const title = item.display_title || item.title;
+    const year = item.display_year || '';
+    const key = `${title.toLocaleLowerCase().trim()}|${year}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+  const html = [...groups.values()].map((items, groupIndex) => {
+    const first = items[0];
+    const title = first.display_title || first.title;
+    const year = first.display_year || '';
+    const matchesCanonical = title.toLocaleLowerCase().trim() === (movie.title || '').toLocaleLowerCase().trim() && (!year || !movie.year || year === movie.year);
+    const film = { ...movie, id: `search_film_${groupIndex}`, title, year, is_series: !!first.is_series || !!first.season_label, genre: first.is_series || first.season_label ? 'Сериал' : 'Фильм', rating: first.rating || (matchesCanonical ? movie.rating : ''), poster: first.poster || (matchesCanonical ? movie.poster : ''), backdrop: first.backdrop || (matchesCanonical ? movie.backdrop : ''), plot: first.overview || (matchesCanonical ? movie.plot : '') };
+    const filmId = registerCatalogItem(film);
+    const ids = items.map(item => registerCatalogItem(item));
+    const matchesMovie = title.toLocaleLowerCase().trim() === (movie.title || '').toLocaleLowerCase().trim();
+    const image = sanitizeImgUrl(first.backdrop || first.poster || (matchesMovie ? (movie.backdrop || movie.poster) : '')) || generateCardSvg(title, year, '');
+    return `<div class="grid-card" onclick="openSearchFilm('${escapeJs(filmId)}', '${escapeJs(ids.join(','))}')">
+      <div class="grid-card-poster-wrap"><img src="${image}" class="grid-card-poster-img" alt="${escapeHtml(title)}" data-title="${escapeHtml(title)}" data-year="${escapeHtml(year)}" onerror="handleCardImgError(this)">
+      <div class="grid-card-hover-overlay"><div class="grid-play-icon">▶</div></div>
+      <div class="grid-card-title-bar">${escapeHtml(title)}${year ? ` (${escapeHtml(year)})` : ''}</div></div>
+      <div class="grid-card-body"><div class="grid-card-meta">${items.length} раздач</div></div></div>`;
   }).join('');
 
   searchGrid.innerHTML = html;
+}
+
+function openSearchFilm(filmId, ids) {
+  const film = state.catalogItemsMap[filmId];
+  const releases = ids.split(',').map(id => state.catalogItemsMap[id]).filter(Boolean);
+  openMovieDetailsWithTorrents(film, releases.slice(0, 2), releases);
 }
 
 // --- NETFLIX DETAIL & EDITIONS MODAL ---
@@ -1829,16 +1915,16 @@ async function openMovieDetails(movieOrId) {
   modalBackdrop.src = sanitizeImgUrl(movie.backdrop || movie.poster);
   modalTitle.textContent = movie.title || '';
   if (modalRatingBadge) modalRatingBadge.textContent = '★ ' + (movie.rating || '8.8');
-  modalYear.textContent = movie.year || '2024';
+  modalYear.textContent = movie.year || 'Год неизвестен';
   modalAge.textContent = movie.age || '16+';
-  modalQuality.textContent = movie.quality || 'Ultra HD 4K';
-  modalAudio.textContent = movie.audio ? 'Dolby 5.1' : 'Стерео';
+  modalQuality.textContent = movie.quality || 'Качество неизвестно';
+  modalAudio.textContent = movie.audio || 'Озвучка неизвестна';
   modalPlot.textContent = movie.plot || 'Описание фильма...';
   modalGenres.textContent = `Жанры: ${movie.genre || 'Фильм'}`;
   modalRating.textContent = `★ ${movie.rating || '8.8'} / 10`;
 
   modalEpisodesSection.style.display = 'none';
-  modalEditionsList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">Загрузка проверенных раздач с RuTracker...</div>';
+  modalEditionsList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">Поиск доступных раздач...</div>';
   movieDetailModal.style.display = 'flex';
   checkActiveMovieDownloadStatus();
   updateModalFavButton();
@@ -1913,16 +1999,17 @@ async function openMovieDetails(movieOrId) {
 }
 
 function openMovieDetailsWithTorrents(movie, verified, allResults) {
+  state.fallbackEnabled = false;
   state.activeMovie = movie;
   state.modalVerified = verified || [];
   state.modalAllResults = allResults || [];
   modalBackdrop.src = sanitizeImgUrl(movie.poster || movie.backdrop);
   modalTitle.textContent = movie.title;
   if (modalRatingBadge) modalRatingBadge.textContent = `${movie.rating || '8.7'} IMDb`;
-  modalYear.textContent = movie.year || '2024';
+  modalYear.textContent = movie.year || 'Год неизвестен';
   modalAge.textContent = '16+';
-  modalQuality.textContent = '4K UHD';
-  modalAudio.textContent = 'Дубляж';
+  modalQuality.textContent = verified[0]?.quality || 'Качество неизвестно';
+  modalAudio.textContent = verified[0]?.audio || 'Озвучка неизвестна';
   modalPlot.textContent = movie.plot || '';
   modalGenres.textContent = `Жанры: ${movie.genre || 'Фильм'}`;
   modalRating.textContent = `★ ${movie.rating || '8.7'} / 10`;
@@ -2073,7 +2160,7 @@ function renderModalEpisodesList(movie) {
           <span class="ep-meta-pill">💾 ${ep.size_str || (ep.size_mb + ' МБ')}</span>
           <span class="ep-meta-pill" style="color:#46d369;">⚡ Прямой поток</span>
         </div>
-        <p class="ep-card-synopsis">Нажмите для мгновенного просмотра серии со звуком.</p>
+        <p class="ep-card-synopsis">Нажмите, чтобы начать просмотр серии.</p>
       </div>
     </div>
   `).join('');
@@ -2098,15 +2185,16 @@ function openTorrentReleaseModal(itemOrId) {
   state.modalAllResults = [item];
   state.preloadedTorrentItem = null;
   state.preloadedStreamData = null;
+  state.preloadPromise = null;
   const modalImg = sanitizeImgUrl(item.backdrop || item.poster) || 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1280&q=80';
   modalBackdrop.onerror = () => { modalBackdrop.src = generateCardSvg(item.display_title || item.title, item.display_year || item.date || '2024', item.quality || 'HD'); };
   modalBackdrop.src = modalImg;
   modalTitle.textContent = item.display_title || item.title || '';
   if (modalRatingBadge) modalRatingBadge.textContent = item.rating ? `★ ${item.rating}` : `▲ ${item.seeds || 0} сидов`;
-  modalYear.textContent = item.display_year || item.date || item.year || '2024';
+  modalYear.textContent = item.display_year || item.year || 'Год неизвестен';
   modalAge.textContent = item.age || '16+';
   modalQuality.textContent = item.quality || 'HD';
-  modalAudio.textContent = item.audio || 'Русский звук';
+  modalAudio.textContent = item.audio || 'Озвучка неизвестна';
   modalPlot.textContent = item.overview || item.plot || `Раздача от источника ${item.source || 'Rutor'}. Размер: ${item.size || 'HD'}. Количество сидеров: ${item.seeds || 0}.`;
   modalGenres.textContent = `Качество: ${item.quality || 'HD'} • Озвучка: ${item.audio || 'Дубляж'}`;
   modalRating.textContent = item.rating ? `★ ${item.rating} / 10` : `Размер: ${item.size || 'HD'}`;
@@ -2153,11 +2241,11 @@ function renderModalEditions(verifiedList, allList) {
   function getSeedPill(seeds) {
     const s = parseInt(seeds) || 0;
     if (s >= 50) {
-      return `<span class="ed-pill" style="color:#46d369; background:rgba(70,211,105,0.18); font-weight:800; border:1px solid rgba(70,211,105,0.3);">🔥 ${s} сидов (Моментальный старт)</span>`;
+      return `<span class="ed-pill" style="color:#46d369; background:rgba(70,211,105,0.18); font-weight:800; border:1px solid rgba(70,211,105,0.3);">🔥 ${s} сидов</span>`;
     } else if (s >= 15) {
-      return `<span class="ed-pill" style="color:#46d369; background:rgba(70,211,105,0.12); font-weight:700;">🟢 ${s} сидов (Отличная скорость)</span>`;
+      return `<span class="ed-pill" style="color:#46d369; background:rgba(70,211,105,0.12); font-weight:700;">🟢 ${s} сидов</span>`;
     } else if (s >= 5) {
-      return `<span class="ed-pill" style="color:#e5a00d; background:rgba(229,160,13,0.12); font-weight:700;">🟡 ${s} сидов (Стабильный стрим)</span>`;
+      return `<span class="ed-pill" style="color:#e5a00d; background:rgba(229,160,13,0.12); font-weight:700;">🟡 ${s} сидов</span>`;
     } else {
       return `<span class="ed-pill" style="color:#ffa726; background:rgba(255,167,38,0.1);">🟠 ${s} сидов</span>`;
     }
@@ -2166,7 +2254,7 @@ function renderModalEditions(verifiedList, allList) {
   let html = list.map((item, idx) => {
     const itemId = registerCatalogItem(item);
     let tagClass = 'tag-1080p-blue';
-    const badge = item.curated_badge || '⭐ ПРОВЕРЕННЫЙ РЕЛИЗ';
+    const badge = item.curated_badge || 'ДОСТУПНАЯ РАЗДАЧА';
     if (badge.includes('4K')) tagClass = 'tag-4k-gold';
     if (badge.includes('БЫСТРЫЙ')) tagClass = 'tag-fast-green';
     if (badge.includes('ОЗВУЧКА')) tagClass = 'tag-audio-purple';
@@ -2275,6 +2363,7 @@ function showAllTorrentReleases(passedList) {
 }
 
 function playSelectedMovie() {
+  state.fallbackEnabled = !state.activeMovie?.is_series;
   const firstPlayBtn = modalEditionsList.querySelector('.n-edition-play-btn');
   if (firstPlayBtn) {
     firstPlayBtn.click();
@@ -2315,36 +2404,68 @@ function getStreamUrlForFile(hash, fileId) {
   }
 }
 
-async function preloadStream(item, fileId = null) {
-  if (!item) return;
-  if (state.settings && state.settings.performance && state.settings.performance.preload_enabled === false) {
-    return;
-  }
+function sameRelease(a, b) {
+  if (!a || !b) return false;
+  if (a.magnet || b.magnet) return !!a.magnet && a.magnet === b.magnet;
+  if (a.topic_id || b.topic_id) return !!a.topic_id && a.topic_id === b.topic_id;
+  if (a.id || b.id) return !!a.id && a.id === b.id;
+  return !!a.title && a.title === b.title;
+}
+
+function preloadStream(item, fileId = null) {
+  if (!item || (state.settings && state.settings.performance && state.settings.performance.preload_enabled === false)) return null;
+  if (sameRelease(state.preloadedTorrentItem, item) && state.preloadPromise) return state.preloadPromise;
   state.preloadedTorrentItem = item;
+  state.preloadedStreamData = null;
   const payload = {
-    title: item.title,
-    magnet: item.magnet,
-    topic_id: item.topic_id,
+    title: item.title, magnet: item.magnet, topic_id: item.topic_id,
     link: item.magnet || (item.topic_id ? `https://rutracker.net/forum/viewtopic.php?t=${item.topic_id}` : null),
     index: fileId
   };
-
-  try {
-    const res = await fetch('/api/stream/preload', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (res.ok) {
-      const data = await res.json();
-      state.preloadedStreamData = data;
-    }
-  } catch (e) {
-    console.log('Preload background notice:', e);
-  }
+  const pending = fetch('/api/stream/preload', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  }).then(async res => {
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (state.preloadPromise === pending && sameRelease(state.preloadedTorrentItem, item)) state.preloadedStreamData = data;
+    return data;
+  }).catch(e => { console.log('Preload background notice:', e); return null; });
+  state.preloadPromise = pending;
+  return pending;
 }
 
-async function startNetflixStream(item, episodeFileId = null, initialSeekTime = 0) {
+async function tryNextStartupRelease(item, playbackSequence) {
+  if (!state.fallbackEnabled || state.fallbackInFlight || playbackSequence !== state.playbackSequence || state.attemptedReleases.length >= 2) return false;
+  const currentAudio = item.audio || 'Озвучка неизвестна';
+  const candidates = state.modalAllResults || [];
+  const next = candidates.find(candidate =>
+    !state.attemptedReleases.some(previous => sameRelease(previous, candidate)) &&
+    (currentAudio === 'Озвучка неизвестна' || candidate.audio === currentAudio)
+  );
+  if (!next) return false;
+  state.fallbackInFlight = true;
+  clearTimeout(state.fallbackTimer);
+  const oldHash = state.activeTorrentHash;
+  state.activeTorrentHash = null;
+  if (oldHash) {
+    await fetch('/api/stream/stop', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ torrent_hash: oldHash })
+    }).catch(() => {});
+  }
+  if (playbackSequence !== state.playbackSequence) return false;
+  state.fallbackInFlight = false;
+  showToast('Раздача не запустилась. Пробуем следующий вариант.', 'info');
+  startNetflixStream(next, null, 0, true);
+  return true;
+}
+
+async function startNetflixStream(item, episodeFileId = null, initialSeekTime = 0, isFallback = false) {
+  clearTimeout(state.fallbackTimer);
+  state.fallbackInFlight = false;
+  if (!isFallback) state.attemptedReleases = [];
+  state.attemptedReleases.push(item);
+  const playbackSequence = ++state.playbackSequence;
   closeDetailModal();
   cancelNextEpisodeCountdown();
   netflixPlayerView.style.display = 'flex';
@@ -2384,17 +2505,11 @@ async function startNetflixStream(item, episodeFileId = null, initialSeekTime = 
 
   try {
     let data = null;
-    const isPreloaded = state.preloadedStreamData &&
-      (state.preloadedStreamData.hash === item.hash ||
-       (state.preloadedTorrentItem && (
-         (item.magnet && state.preloadedTorrentItem.magnet === item.magnet) ||
-         (item.id && state.preloadedTorrentItem.id === item.id) ||
-         (item.title && state.preloadedTorrentItem.title === item.title)
-       )));
-
+    const isPreloaded = sameRelease(state.preloadedTorrentItem, item);
     if (isPreloaded) {
-      data = state.preloadedStreamData;
-    } else {
+      data = state.preloadedStreamData || (state.preloadPromise ? await state.preloadPromise : null);
+    }
+    if (!data) {
       const payload = {
         title: item.title,
         magnet: item.magnet,
@@ -2423,6 +2538,7 @@ async function startNetflixStream(item, episodeFileId = null, initialSeekTime = 
       data = await res.json();
     }
 
+    if (playbackSequence !== state.playbackSequence) return;
     state.activeTorrentHash = data.hash;
     state.videoFiles = data.video_files || [];
     state.seasons = data.seasons || {};
@@ -2492,10 +2608,19 @@ async function startNetflixStream(item, episodeFileId = null, initialSeekTime = 
     netflixVideo.play().catch(e => console.log('Autoplay deferred:', e));
 
     startStatsPolling();
+    if (state.fallbackEnabled && initialSeekTime === 0 && episodeFileId === null) {
+      state.fallbackTimer = setTimeout(() => {
+        if (playbackSequence === state.playbackSequence && !netflixVideo.paused && netflixVideo.currentTime < 0.5) {
+          tryNextStartupRelease(item, playbackSequence);
+        }
+      }, 35000);
+    }
     loadAudioTracks(state.activeTorrentHash, state.activeFileIndex);
     loadDubbingOptions(state.activeMovieTitle, state.activeTorrentHash);
 
   } catch (err) {
+    if (playbackSequence !== state.playbackSequence) return;
+    if (await tryNextStartupRelease(item, playbackSequence)) return;
     alert('Ошибка запуска: ' + err.message);
     exitNetflixPlayer();
   }
@@ -2706,11 +2831,12 @@ function switchAudioTrack(trackIdx) {
   playerAudioMenu.style.display = 'none';
 }
 
-async function loadAudioTracks(hash, fileId) {
+async function loadAudioTracks(hash, fileId, attempt = 0) {
   try {
     const res = await fetch(`/api/stream/tracks?link=${hash}&index=${fileId}`);
     if (!res.ok) return;
     const data = await res.json();
+    if (hash !== state.activeTorrentHash || fileId !== state.activeFileIndex) return;
     state.audioTracks = data.audio_tracks || [];
     renderAudioTracksMenu();
     state.subtitleTracks = data.subtitle_tracks || [];
@@ -2719,6 +2845,10 @@ async function loadAudioTracks(hash, fileId) {
       state.mediaDuration = Math.round(data.duration);
       playerDuration.textContent = formatTime(state.mediaDuration);
       updateProgress();
+    } else if (attempt < 6) {
+      setTimeout(() => {
+        if (hash === state.activeTorrentHash && fileId === state.activeFileIndex) loadAudioTracks(hash, fileId, attempt + 1);
+      }, 8000);
     }
   } catch (e) {
     console.log('Tracks probe notice:', e);
@@ -2985,6 +3115,13 @@ function applyAudioSync() {
 }
 
 async function exitNetflixPlayer() {
+  state.playbackSequence++;
+  clearTimeout(state.fallbackTimer);
+  state.fallbackEnabled = false;
+  state.fallbackInFlight = false;
+  state.preloadedTorrentItem = null;
+  state.preloadedStreamData = null;
+  state.preloadPromise = null;
   cancelNextEpisodeCountdown();
   netflixVideo.pause();
   netflixVideo.removeAttribute('src');
@@ -3037,6 +3174,7 @@ function setupPlayerEventListeners() {
     }
   });
   netflixVideo.addEventListener('playing', () => {
+    clearTimeout(state.fallbackTimer);
     playerSpinner.style.display = 'none';
     updatePlayPauseIcons();
     if (state.streamHealth) {
@@ -3045,8 +3183,11 @@ function setupPlayerEventListeners() {
   });
   netflixVideo.addEventListener('pause', updatePlayPauseIcons);
   netflixVideo.addEventListener('progress', updateBufferedRange);
-  netflixVideo.addEventListener('error', (e) => {
+  netflixVideo.addEventListener('error', async (e) => {
     console.warn('Video playback notice:', netflixVideo.error);
+    const sequence = state.playbackSequence;
+    if (state.activeTorrentItem && !state.currentSeekOffset && netflixVideo.currentTime < 0.5 && await tryNextStartupRelease(state.activeTorrentItem, sequence)) return;
+    if (sequence !== state.playbackSequence) return;
     playerSpinner.style.display = 'none';
     const banner = document.getElementById('playerHealthText');
     if (banner) {
@@ -3329,7 +3470,7 @@ function startStatsPolling() {
           const shouldWarn = elapsed > 4.0 && (
             state.streamHealth.lowSpeedTicks >= 3 ||
             state.streamHealth.freezeTicks >= 2 ||
-            state.streamHealth.stallEvents >= 2
+            (state.streamHealth.stallEvents >= 2 && speed < 0.5)
           );
 
           if (shouldWarn) {
@@ -3359,6 +3500,7 @@ function startStatsPolling() {
           } else {
             // Restore normal state if speed recovers
             if (state.streamHealth.isWarning && speed >= 0.5 && state.streamHealth.freezeTicks === 0) {
+              state.streamHealth.stallEvents = 0;
               state.streamHealth.isWarning = false;
               if (playerHealthPill) {
                 playerHealthPill.classList.remove('warning-state');
@@ -3384,7 +3526,7 @@ function startStatsPolling() {
           playerHealthText.textContent = `⚡ ${vpnLabel} • ${stats.download_speed_mb} МБ/с • ${stats.active_peers} пиров • Буфер: ${stats.buffer_percent}%`;
         }
 
-        if (stats.is_ready) {
+        if (netflixVideo.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
           playerSpinner.style.display = 'none';
         }
       }
@@ -3915,6 +4057,10 @@ function initVoiceRecognition() {
   recog.continuous = false;
 
   recog.onstart = () => {
+    if (document.getElementById('voiceModal')?.style.display !== 'flex') {
+      try { recog.abort(); } catch (_) {}
+      return;
+    }
     _isVoiceListening = true;
     updateVoiceMicUI(true);
   };
@@ -3943,18 +4089,22 @@ function initVoiceRecognition() {
   };
 
   recog.onerror = (event) => {
+    if (event.error === 'aborted') return;
     console.warn('Voice recognition notice:', event.error);
     _isVoiceListening = false;
     updateVoiceMicUI(false);
-    if (event.error === 'not-allowed') {
-      const sub = document.getElementById('voiceStatusSubtitle');
-      if (sub) sub.textContent = 'Доступ к микрофону заблокирован в браузере. Разрешите микрофон или введите название фильма вручную.';
-    }
+    const messages = { 'not-allowed': 'Доступ к микрофону запрещён. Разрешите его в настройках браузера или введите название вручную.', 'service-not-allowed': 'Сервис распознавания недоступен. Попробуйте Chrome или введите название вручную.', 'audio-capture': 'Микрофон не найден. Проверьте подключение или введите название вручную.', 'network': 'Нет связи с сервисом распознавания. Проверьте интернет или введите название вручную.', 'no-speech': 'Не удалось расслышать речь. Нажмите на микрофон и повторите.' };
+    const title = document.getElementById('voiceStatusTitle');
+    if (title) title.textContent = 'Голосовой поиск';
+    const subtitle = document.getElementById('voiceStatusSubtitle');
+    if (subtitle) subtitle.textContent = messages[event.error] || 'Не удалось распознать речь. Повторите или введите название вручную.';
   };
 
   recog.onend = () => {
     _isVoiceListening = false;
     updateVoiceMicUI(false);
+    const title = document.getElementById('voiceStatusTitle');
+    if (title && title.textContent === 'Слушаю вас...') title.textContent = 'Нажмите на микрофон, чтобы повторить';
   };
 
   return recog;
@@ -4017,7 +4167,8 @@ function startVoiceListening() {
   try {
     _voiceRecog.start();
   } catch (err) {
-    // Already active or restarting
+    const sub = document.getElementById('voiceStatusSubtitle');
+    if (sub && err.name !== 'InvalidStateError') sub.textContent = 'Не удалось включить микрофон. Попробуйте ещё раз или введите название вручную.';
   }
 }
 
@@ -4026,9 +4177,9 @@ function stopVoiceListening() {
     clearTimeout(_voiceAutoRestartTimer);
     _voiceAutoRestartTimer = null;
   }
-  if (_voiceRecog && _isVoiceListening) {
+  if (_voiceRecog) {
     try {
-      _voiceRecog.stop();
+      _voiceRecog.abort();
     } catch (_) {}
   }
   _isVoiceListening = false;
@@ -4068,143 +4219,19 @@ function parseVoiceSelection(text) {
 }
 
 async function handleFinalVoiceInput(spokenText) {
-  if (!spokenText) return;
-
-  // If choices are already displayed, check if the user said a selection ("первый", "второй", "1", "2")
-  if (_voiceResults && _voiceResults.length > 0) {
-    const choiceIdx = parseVoiceSelection(spokenText);
-    if (choiceIdx >= 0 && choiceIdx < _voiceResults.length) {
-      launchMovieDirectly(_voiceResults[choiceIdx]);
-      return;
-    }
+  if (spokenText && document.getElementById('voiceModal')?.style.display === 'flex') {
+    executeVoiceSearch(spokenText);
   }
-
-  // Otherwise, treat as a film search query
-  await executeVoiceSearch(spokenText);
 }
 
-async function executeVoiceSearch(query) {
-  if (!query || !query.trim()) return;
-  const q = query.trim();
-  stopVoiceListening();
-
-  showVoiceTranscript(q);
-  const statusTitle = document.getElementById('voiceStatusTitle');
-  if (statusTitle) statusTitle.textContent = `Поиск: «${q}»...`;
-  const statusSub = document.getElementById('voiceStatusSubtitle');
-  if (statusSub) statusSub.textContent = 'Ищем лучшие раздачи с высоким качеством и звуком...';
-
-  const grid = document.getElementById('voiceResultsGrid');
-  if (grid) {
-    grid.innerHTML = `
-      <div style="grid-column: 1/-1; padding: 36px; text-align: center; color: #aaa;">
-        <div class="netflix-spinner-circle" style="width: 36px; height: 36px; margin: 0 auto 12px;"></div>
-        Поиск фильма «${escapeHtml(q)}»...
-      </div>
-    `;
-  }
-
-  try {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&source=all`);
-    const data = await res.json();
-    const verified = data.verified_editions || [];
-    const results = data.results || [];
-    const movieMeta = data.movie;
-
-    const candidates = [];
-    const seen = new Set();
-
-    // 1. Add verified editions first (Multi-season pack, Latest season, 1080p BD)
-    for (const v of verified) {
-      const key = v.id || v.title;
-      if (!seen.has(key)) {
-        seen.add(key);
-        candidates.push({
-          id: v.id,
-          title: v.season_label ? `${movieMeta?.title || v.title} • ${v.season_label}` : (v.curated_category || v.title),
-          poster: v.poster || movieMeta?.poster,
-          backdrop: v.backdrop || movieMeta?.backdrop,
-          year: v.display_year || movieMeta?.year || '2024',
-          rating: movieMeta?.rating || '8.8',
-          quality: v.quality || 'Full HD',
-          seeds: v.seeds,
-          badge: v.curated_badge || '⭐ ПРОВЕРЕННАЯ РАЗДАЧА',
-          torrent_item: v
-        });
-      }
-    }
-
-    // 2. Add top releases from results
-    for (const r of results) {
-      const key = r.id || r.title;
-      if (!seen.has(key) && candidates.length < 5) {
-        seen.add(key);
-        candidates.push({
-          id: r.id,
-          title: r.display_title || r.title,
-          poster: r.poster || movieMeta?.poster,
-          backdrop: r.backdrop || movieMeta?.backdrop,
-          year: r.display_year || r.date || '2024',
-          rating: r.rating || movieMeta?.rating || '8.5',
-          quality: r.quality || 'HD',
-          seeds: r.seeds,
-          badge: r.season_label || `${r.seeds} сидов`,
-          torrent_item: r
-        });
-      }
-    }
-
-    _voiceResults = candidates;
-
-    if (!candidates.length) {
-      if (statusTitle) statusTitle.textContent = `По запросу «${q}» ничего не найдено`;
-      if (statusSub) statusSub.textContent = 'Попробуйте произнести название иначе или воспользуйтесь строкой ввода.';
-      if (grid) grid.innerHTML = '<div style="grid-column: 1/-1; padding: 20px; color: #888;">Раздачи не найдены. Нажмите на микрофон и попробуйте снова.</div>';
-      return;
-    }
-
-    if (statusTitle) statusTitle.textContent = `Выберите вариант:`;
-    if (statusSub) statusSub.textContent = `Найдено вариантов: ${candidates.length}. Фильм запустится сразу после выбора!`;
-    const hint = document.getElementById('voiceChoiceHint');
-    if (hint) hint.style.display = 'flex';
-
-    if (grid) {
-      grid.innerHTML = candidates.map((item, idx) => {
-        const choiceNum = idx + 1;
-        const img = sanitizeImgUrl(item.backdrop || item.poster) || generateCardSvg(item.title, item.year, item.quality);
-        const isTop = (idx === 0);
-        return `
-          <div class="voice-card ${isTop ? 'voice-card-top' : ''}" onclick="launchMovieDirectly(_voiceResults[${idx}])" id="voiceCard_${idx}">
-            <div class="voice-card-choice-num">${choiceNum}</div>
-            <div class="voice-card-thumb-wrap">
-              <img src="${img}" alt="${escapeHtml(item.title)}" class="voice-card-img" data-title="${escapeHtml(item.title)}" data-year="${escapeHtml(item.year || '')}" data-quality="${escapeHtml(item.quality || 'HD')}" onerror="handleCardImgError(this);">
-            </div>
-            <div class="voice-card-body">
-              <div class="voice-card-title">${escapeHtml(item.title)}</div>
-              <div class="voice-card-meta">
-                <span style="color:#ffcc00; font-weight:800;">★ ${item.rating || '8.8'}</span>
-                <span>${item.year}</span>
-                <span class="quality-badge">${escapeHtml(item.quality || 'HD')}</span>
-              </div>
-              <button class="voice-card-play-btn" onclick="event.stopPropagation(); launchMovieDirectly(_voiceResults[${idx}])">
-                ▶ Запустить [${choiceNum}]
-              </button>
-            </div>
-          </div>
-        `;
-      }).join('');
-    }
-
-    // Auto-listen for choice command ("первый", "второй", "1", "2") after 600ms
-    _voiceAutoRestartTimer = setTimeout(() => {
-      startVoiceListening();
-    }, 600);
-
-  } catch (err) {
-    if (statusTitle) statusTitle.textContent = 'Ошибка поиска';
-    if (statusSub) statusSub.textContent = err.message;
-    if (grid) grid.innerHTML = `<div style="grid-column: 1/-1; color: #ff6b6b; padding: 20px;">${err.message}</div>`;
-  }
+function executeVoiceSearch(query) {
+  const q = (query || '').trim();
+  if (!q) return;
+  closeVoiceModal();
+  netflixSearchInput.value = q;
+  searchBox.classList.add('open');
+  searchClearBtn.style.display = 'block';
+  performSearch(q);
 }
 
 async function launchMovieDirectly(item) {

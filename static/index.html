@@ -55,7 +55,7 @@
       </button>
 
       <!-- Netflix Expanding Search Bar -->
-      <div class="netflix-search-box" id="searchBox">
+      <div class="netflix-search-box open" id="searchBox">
         <button class="search-trigger-btn" onclick="toggleSearchInput()" title="Поиск фильмов и сериалов">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2">
             <circle cx="11" cy="11" r="8"></circle>
@@ -65,6 +65,7 @@
         <input 
           type="text" 
           id="netflixSearchInput" 
+          aria-label="Поиск фильмов и сериалов"
           placeholder="Фильмы, сериалы, ссылка с RuTracker..." 
           autocomplete="off"
           oninput="handleSearchInput(this.value)"
@@ -106,7 +107,7 @@
 
         <div class="billboard-content">
           <div class="billboard-badge-row">
-            <span class="n-series-badge">N ЭКСКЛЮЗИВ</span>
+            <span class="n-series-badge">СЕГОДНЯ В KINOFLIX</span>
           </div>
 
           <h1 class="billboard-title" id="billboardTitle">ДЮНА: ЧАСТЬ ВТОРАЯ</h1>
@@ -396,9 +397,9 @@
           <div class="editions-header">
             <div class="editions-title-wrap">
               <span class="editions-crown">👑</span>
-              <h3>Проверенные варианты качества и озвучки</h3>
+              <h3>Доступные варианты качества и озвучки</h3>
             </div>
-            <span class="editions-subtitle">Выберите подходящую версию релиза для мгновенного просмотра</span>
+            <span class="editions-subtitle">Выберите подходящую раздачу; скорость зависит от доступных пиров</span>
           </div>
 
           <div class="editions-list" id="modalEditionsList">

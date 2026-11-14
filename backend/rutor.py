@@ -1,4 +1,5 @@
 import re
+import asyncio
 import urllib.parse
 from typing import List, Dict, Any, Optional
 import httpx
@@ -85,7 +86,11 @@ def parse_audio(title: str) -> str:
         audios.append("MVO")
     if "оригинал" in title_lower or "sub" in title_lower or "субтитр" in title_lower:
         audios.append("Субтитры")
-    return ", ".join(audios) if audios else "Русский звук"
+    return ", ".join(audios) if audios else "Озвучка неизвестна"
+
+def is_non_video_release(name: str) -> bool:
+    """Discard explicitly identified books and audio-only releases."""
+    return bool(re.search(r"(?:\b(?:audiobook|audio book|ebook|epub|mobi|pdf)\b|\.(?:epub|mobi|pdf|mp3|m4b|flac)(?:\b|$))", name, re.IGNORECASE))
 
 async def search_torrents_csv(query: str, limit: int = 30, min_seeds: int = 1) -> List[Dict[str, Any]]:
     """
@@ -110,6 +115,8 @@ async def search_torrents_csv(query: str, limit: int = 30, min_seeds: int = 1) -
                     if not ih:
                         continue
                     name = t.get("name") or "Video"
+                    if is_non_video_release(name):
+                        continue
                     magnet = f"magnet:?xt=urn:btih:{ih}&dn={urllib.parse.quote(name)}{trackers_suffix}"
                     size_b = int(t.get("size_bytes") or 0)
                     results.append({
@@ -149,7 +156,7 @@ async def search_apibay(query: str, limit: int = 30, min_seeds: int = 1) -> List
                 data = resp.json()
                 for t in data:
                     name = t.get("name") or ""
-                    if name == "No results returned":
+                    if name == "No results returned" or is_non_video_release(name):
                         continue
                     seeds = int(t.get("seeders") or 0)
                     if seeds < min_seeds:
@@ -189,96 +196,95 @@ async def search_rutor(query: str, limit: int = 40, min_seeds: int = 2) -> List[
     results: List[Dict[str, Any]] = []
 
     async with httpx.AsyncClient(timeout=3.5, follow_redirects=True) as client:
-        for ep in RUTOR_ENDPOINTS:
-            base_url = ep["url"]
-            host_header = ep.get("host")
-            req_headers = dict(HEADERS)
-            if host_header:
-                req_headers["Host"] = host_header
-
-            # Formula: /search/0/0/000/2/query sorts by seeds descending
-            url = f"{base_url}/search/0/0/000/2/{encoded_query}"
+        async def fetch_endpoint(ep):
+            headers = dict(HEADERS)
+            if ep.get("host"):
+                headers["Host"] = ep["host"]
             try:
-                resp = await client.get(url, headers=req_headers)
-                if resp.status_code == 200 and "index" in resp.text:
-                    html = resp.text
+                return await client.get(f"{ep['url']}/search/0/0/000/2/{encoded_query}", headers=headers)
+            except httpx.HTTPError:
+                return None
 
-                    row_chunks = re.findall(r'<tr class="(?:gai|tum)">.*?</tr>', html, re.DOTALL)
-                    for chunk in row_chunks:
-                        mag_m = re.search(r'href="(magnet:\?xt=[^"]+)"', chunk)
-                        if not mag_m:
-                            continue
-                        raw_magnet = mag_m.group(1)
-                        magnet = enrich_magnet_trackers(raw_magnet)
-
-                        title_m = re.search(r'<a href="/torrent/(\d+)/[^"]*">([^<]+)</a>', chunk)
-                        if not title_m:
-                            continue
-                        torrent_id = title_m.group(1)
-                        import html as html_lib
-                        full_title = html_lib.unescape(title_m.group(2).strip())
-
-                        size_m = re.search(r'<td align="right">([^<]+)</td>', chunk)
-                        size_str = size_m.group(1).replace("&nbsp;", " ").strip() if size_m else "N/A"
-
-                        # Parse seeds from <span class="green"><img ... />&nbsp;XX</span>
-                        span_green = re.search(r'<span class="green">(.*?)</span>', chunk)
-                        seeds = 0
-                        if span_green:
-                            s_clean = span_green.group(1).replace("&nbsp;", "")
-                            num_m = re.search(r'(\d+)', s_clean)
-                            if num_m:
-                                seeds = int(num_m.group(1))
-
-                        # Parse leeches
-                        span_red = re.search(r'<span class="red">(.*?)</span>', chunk)
-                        leech = 0
-                        if span_red:
-                            l_clean = span_red.group(1).replace("&nbsp;", "")
-                            num_l = re.search(r'(\d+)', l_clean)
-                            if num_l:
-                                leech = int(num_l.group(1))
-
-                        # Skip releases with no seeds for streaming
-                        if seeds < min_seeds:
-                            continue
-
-                        date_m = re.search(r'<td>(\d{1,2}\s+[А-Яа-яA-Za-z]{3}\s+\d{2})</td>', chunk)
-                        date_str = date_m.group(1).replace("&nbsp;", " ") if date_m else ""
-
-                        quality = parse_quality(full_title)
-                        audio = parse_audio(full_title)
-
-                        results.append({
-                            "id": f"rutor_{torrent_id}",
-                            "source": "Rutor",
-                            "title": full_title,
-                            "magnet": magnet,
-                            "torrent_url": f"http://rutor.info/download/{torrent_id}",
-                            "size": size_str,
-                            "seeds": seeds,
-                            "leeches": leech,
-                            "date": date_str,
-                            "quality": quality,
-                            "audio": audio,
-                            "details_url": f"http://rutor.info/torrent/{torrent_id}"
-                        })
-
-                        if len(results) >= limit:
-                            break
-
-                    if results:
-                        return results
-            except Exception:
+        # Query mirrors and independent indexes together, rather than adding
+        # their timeouts one after another.
+        responses, csv_results, apibay_results = await asyncio.gather(
+            asyncio.gather(*(fetch_endpoint(ep) for ep in RUTOR_ENDPOINTS)),
+            search_torrents_csv(query, limit=limit, min_seeds=min_seeds),
+            search_apibay(query, limit=limit, min_seeds=min_seeds),
+        )
+        for resp in responses:
+            if resp is None:
                 continue
+            if resp.status_code == 200 and "index" in resp.text:
+                html = resp.text
 
-    # Fallback to Torrents-CSV and Apibay if Rutor yielded no results
-    if not results:
-        csv_results = await search_torrents_csv(query, limit=limit, min_seeds=min_seeds)
-        if csv_results:
-            results.extend(csv_results)
-        if len(results) < limit:
-            apibay_results = await search_apibay(query, limit=limit - len(results), min_seeds=min_seeds)
-            results.extend(apibay_results)
+                row_chunks = re.findall(r'<tr class="(?:gai|tum)">.*?</tr>', html, re.DOTALL)
+                for chunk in row_chunks:
+                    mag_m = re.search(r'href="(magnet:\?xt=[^"]+)"', chunk)
+                    if not mag_m:
+                        continue
+                    raw_magnet = mag_m.group(1)
+                    magnet = enrich_magnet_trackers(raw_magnet)
 
+                    title_m = re.search(r'<a href="/torrent/(\d+)/[^"]*">([^<]+)</a>', chunk)
+                    if not title_m:
+                        continue
+                    torrent_id = title_m.group(1)
+                    import html as html_lib
+                    full_title = html_lib.unescape(title_m.group(2).strip())
+
+                    size_m = re.search(r'<td align="right">([^<]+)</td>', chunk)
+                    size_str = size_m.group(1).replace("&nbsp;", " ").strip() if size_m else "N/A"
+
+                    # Parse seeds from <span class="green"><img ... />&nbsp;XX</span>
+                    span_green = re.search(r'<span class="green">(.*?)</span>', chunk)
+                    seeds = 0
+                    if span_green:
+                        s_clean = span_green.group(1).replace("&nbsp;", "")
+                        num_m = re.search(r'(\d+)', s_clean)
+                        if num_m:
+                            seeds = int(num_m.group(1))
+
+                    # Parse leeches
+                    span_red = re.search(r'<span class="red">(.*?)</span>', chunk)
+                    leech = 0
+                    if span_red:
+                        l_clean = span_red.group(1).replace("&nbsp;", "")
+                        num_l = re.search(r'(\d+)', l_clean)
+                        if num_l:
+                            leech = int(num_l.group(1))
+
+                    # Skip releases with no seeds for streaming
+                    if seeds < min_seeds:
+                        continue
+
+                    date_m = re.search(r'<td>(\d{1,2}\s+[А-Яа-яA-Za-z]{3}\s+\d{2})</td>', chunk)
+                    date_str = date_m.group(1).replace("&nbsp;", " ") if date_m else ""
+
+                    quality = parse_quality(full_title)
+                    audio = parse_audio(full_title)
+
+                    results.append({
+                        "id": f"rutor_{torrent_id}",
+                        "source": "Rutor",
+                        "title": full_title,
+                        "magnet": magnet,
+                        "torrent_url": f"http://rutor.info/download/{torrent_id}",
+                        "size": size_str,
+                        "seeds": seeds,
+                        "leeches": leech,
+                        "date": date_str,
+                        "quality": quality,
+                        "audio": audio,
+                        "details_url": f"http://rutor.info/torrent/{torrent_id}"
+                    })
+
+                    if len(results) >= limit:
+                        break
+
+                if results:
+                    break
+
+    results.extend(csv_results)
+    results.extend(apibay_results)
     return results

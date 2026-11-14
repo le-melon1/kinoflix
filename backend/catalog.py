@@ -1222,7 +1222,10 @@ async def get_more_category_movies(category_id: str, page: int = 1) -> List[Dict
                         continue
                     is_series = (mtype == "tv") or (r.get("media_type") == "tv")
                     rel = r.get("release_date") or r.get("first_air_date") or ""
-                    year = rel[:4] if len(rel) >= 4 else "2024"
+                    from datetime import date
+                    if rel and rel > date.today().isoformat():
+                        continue
+                    year = rel[:4] if len(rel) >= 4 else ""
                     vote_avg = r.get("vote_average", 8.0)
                     rating = round(vote_avg, 1)
                     items.append({
@@ -1232,20 +1235,21 @@ async def get_more_category_movies(category_id: str, page: int = 1) -> List[Dict
                         "year": year,
                         "rating": str(rating),
                         "age": "18+" if r.get("adult") else "16+",
-                        "duration": "Сериал" if is_series else "2 ч 10 мин",
-                        "quality": "4K UHD" if rating >= 7.5 else "1080p Full HD",
-                        "audio": "Дубляж • Лицензия",
+                        "duration": "Сериал" if is_series else "",
+                        "quality": "",
+                        "audio": "",
                         "genre": "Рекомендации KinoFlix",
                         "backdrop": tmdb_img_mirror(f"https://image.tmdb.org/t/p/w1280{b_path}" if b_path else f"https://image.tmdb.org/t/p/w780{p_path}"),
                         "poster": tmdb_img_mirror(f"https://image.tmdb.org/t/p/w780{p_path}" if p_path else f"https://image.tmdb.org/t/p/w1280{b_path}"),
-                        "plot": r.get("overview") or "Захватывающий сюжет с неожиданными поворотами и великолепной актёрской игрой.",
+                        "plot": r.get("overview") or "",
                         "search_query": title,
                         "is_series": is_series
                     })
     except Exception as e:
         print(f"Error fetching more category {category_id}: {e}")
 
-    _cat_page_cache[cache_key] = items
+    if items:
+        _cat_page_cache[cache_key] = items
     return items
 
 def get_catalog_magnet(identifier: Optional[str]) -> Optional[str]:

@@ -1,5 +1,5 @@
 // --- KINOFLIX SERVICE WORKER (PWA) ---
-const CACHE_NAME = 'kinoflix-shell-v4';
+const CACHE_NAME = 'kinoflix-shell-v5';
 
 self.addEventListener('install', (event) => {
   // Skip waiting immediately to replace any stale service worker
@@ -10,7 +10,7 @@ self.addEventListener('activate', (event) => {
   // Delete all old cache stores to ensure fresh assets
   event.waitUntil(
     caches.keys().then((keys) => {
-      return Promise.all(keys.map((key) => caches.delete(key)));
+      return Promise.all(keys.filter((key) => key.startsWith('kinoflix-shell-') && key !== CACHE_NAME).map((key) => caches.delete(key)));
     }).then(() => self.clients.claim())
   );
 });
@@ -20,7 +20,7 @@ self.addEventListener('fetch', (event) => {
 
   // Bypass cache completely for stream endpoints
   if (
-    url.pathname.startsWith('/api/stream') ||
+    url.pathname.startsWith('/api/') ||
     url.pathname.startsWith('/stream') ||
     url.pathname.startsWith('/api/downloads/play')
   ) {

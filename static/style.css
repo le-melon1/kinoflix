@@ -131,7 +131,7 @@ body.netflix-body {
 }
 
 .netflix-search-box.open #netflixSearchInput {
-  width: 240px;
+  width: clamp(240px, 25vw, 380px);
   opacity: 1;
   margin-left: 8px;
 }
@@ -3054,3 +3054,109 @@ body.tv-mode .netflix-header {
 }
 
 
+
+/* Keep the search prominent while retaining room for navigation. */
+@media (max-width: 1200px) {
+  .netflix-search-box.open #netflixSearchInput { width: clamp(180px, 23vw, 280px); }
+  .nav-left { gap: 16px; }
+  .nav-right { gap: 8px; }
+}
+@media (max-width: 768px) {
+  .netflix-search-box.open { position: absolute; left: 4%; right: 4%; top: 70px; z-index: 2; background: #181818; }
+  .netflix-search-box.open #netflixSearchInput { width: 100%; min-width: 0; font-size: 1rem; }
+  .netflix-header { background: #141414; }
+}
+
+@media (max-width: 1450px) {
+  #installAppBtn { display: none !important; }
+  .nav-links { gap: 12px; }
+  .nav-left { gap: 16px; }
+  .nav-right { gap: 8px; }
+}
+
+/* Consistent layout at desktop, laptop and phone widths. */
+.netflix-header, .nav-left, .nav-right { min-width: 0; }
+.nav-link, .nav-pill, .voice-search-btn, .tv-mode-btn { white-space: nowrap; }
+.billboard-content { width: min(100%, 600px); min-width: 0; }
+.billboard-title, .modal-hero-title, .edition-title, .edition-details-text { overflow-wrap: anywhere; }
+.billboard-buttons, .modal-hero-buttons, .edition-tags-row { flex-wrap: wrap; }
+.modal-left, .modal-right, .edition-left-info { min-width: 0; }
+.edition-tags-row { row-gap: 6px; }
+.player-title-info { min-width: 0; max-width: min(75%, 900px); }
+.player-main-title, .player-sub-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.n-controls-left, .n-controls-right { flex-shrink: 0; }
+.n-controls-center { min-width: 0; margin: 0 12px; }
+.n-stream-health-pill { min-width: 0; max-width: 100%; }
+#playerHealthText { min-width: 0; overflow-wrap: anywhere; }
+.age-badge:empty, .duration-badge:empty, .quality-badge:empty, .audio-badge:empty { display: none; }
+
+@media (max-width: 1650px) {
+  .nav-left .nav-links { display: none; }
+  .nav-left { display: none; }
+  .nav-right { width: 100%; justify-content: flex-end; }
+  .mobile-bottom-nav { display: flex; }
+  .netflix-main { padding-bottom: 76px; }
+  .n-controls-bar { position: relative; }
+  .n-controls-center { position: absolute; right: 0; bottom: 56px; margin: 0; max-width: min(75vw, 480px); }
+}
+
+@media (max-width: 768px) {
+  .netflix-header { padding-inline: 4%; }
+  .nav-right { justify-content: space-between; }
+  #tvModeBtn, #rutrackerStatusPill { display: none; }
+  .netflix-search-box.open { top: 68px; }
+  .billboard-section { min-height: 560px; height: 78vh; }
+  .billboard-content { width: 100%; max-width: 100%; margin-top: 104px; }
+  .billboard-title { font-size: clamp(2.3rem, 10vw, 3.5rem); line-height: 1.04; }
+  .billboard-plot { font-size: 0.95rem; -webkit-line-clamp: 3; }
+  .billboard-buttons { gap: 8px; }
+  .billboard-buttons .netflix-play-btn, .billboard-buttons .netflix-info-btn { padding: 10px 14px; font-size: 0.9rem; }
+  .netflix-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); gap: 14px; }
+  .netflix-modal-backdrop { padding: 16px 12px; }
+  .modal-hero { height: 300px; }
+  .modal-hero-actions { left: 20px; right: 20px; bottom: 18px; }
+  .modal-hero-title { font-size: clamp(1.5rem, 6vw, 2rem); }
+  .modal-hero-buttons { gap: 8px; }
+  .modal-content { padding: 20px; gap: 24px; }
+  .modal-columns { flex-direction: column; gap: 18px; }
+  .modal-right { border-left: 0; border-top: 1px solid var(--netflix-border); padding: 16px 0 0; }
+  .edition-item-card { flex-wrap: wrap; gap: 12px; padding: 14px; }
+  .edition-left-info { flex-basis: 100%; }
+  .edition-actions { flex-wrap: wrap; }
+  .netflix-player-top { height: auto; min-height: 72px; padding: 14px 16px; gap: 12px; }
+  .n-back-circle-btn { flex: 0 0 42px; width: 42px; height: 42px; }
+  .player-title-info { flex: 1; max-width: calc(100% - 54px); }
+  .player-main-title { font-size: 1rem; }
+  .netflix-player-bottom { padding: 0 16px calc(16px + env(safe-area-inset-bottom, 0px)); }
+  .n-controls-bar { height: auto; min-height: 48px; flex-wrap: wrap; gap: 12px; }
+  .n-controls-left, .n-controls-right { gap: 10px; }
+  .n-controls-right { flex-wrap: wrap; justify-content: flex-end; }
+  .n-controls-center { bottom: calc(100% + 28px); max-width: 100%; }
+  .n-stream-health-pill { font-size: 0.7rem; }
+  .voice-modal-card { width: calc(100% - 24px); padding: 28px 18px; }
+}
+.mobile-bottom-nav { z-index: 90; }
+@media (max-width: 768px) {
+  .search-results-header { padding-top: 130px; flex-wrap: wrap; gap: 12px; }
+  .search-heading { font-size: 1.2rem; overflow-wrap: anywhere; }
+  .search-source-filter { flex-wrap: wrap; }
+  .n-player-episodes-drawer, .n-player-release-drawer { right: 12px; width: min(360px, calc(100vw - 24px)); }
+  #playerAudioMenu { min-width: 0; width: min(340px, calc(100vw - 32px)); }
+}
+
+@media (max-width: 768px) {
+  .n-dropdown-menu, #playerAudioMenu {
+    position: fixed;
+    left: 16px;
+    right: 16px;
+    bottom: 116px;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    max-height: min(65vh, 420px);
+    overflow-y: auto;
+  }
+}
+/* Menus should stay above the buffering message, including on small screens. */
+.netflix-player-bottom { z-index: 40; }
+.netflix-center-spinner button { pointer-events: auto; }

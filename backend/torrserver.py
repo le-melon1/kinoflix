@@ -7,6 +7,7 @@ import socket
 import sys
 import shutil
 import platform
+import threading
 import urllib.parse
 from typing import Optional, Dict, Any, List, Tuple
 import httpx
@@ -253,7 +254,7 @@ def probe_media_tracks(torrent_hash: str, index: int = 1) -> Dict[str, Any]:
                 idx = len(audio_tracks)
                 c = s.get("codec_name", "ac3")
                 title = s.get("tags", {}).get("title") or s.get("tags", {}).get("language") or f"Дорожка #{idx+1}"
-                lang = s.get("tags", {}).get("language", "rus")
+                lang = s.get("tags", {}).get("language", "und")
                 audio_tracks.append({
                     "id": idx,
                     "codec": c,
@@ -265,7 +266,7 @@ def probe_media_tracks(torrent_hash: str, index: int = 1) -> Dict[str, Any]:
                 idx = len(subtitle_tracks)
                 c = s.get("codec_name", "subrip")
                 title = s.get("tags", {}).get("title") or s.get("tags", {}).get("language") or f"Субтитры #{idx+1}"
-                lang = s.get("tags", {}).get("language", "rus")
+                lang = s.get("tags", {}).get("language", "und")
                 subtitle_tracks.append({
                     "id": idx,
                     "codec": c,
@@ -302,15 +303,31 @@ def probe_media_tracks(torrent_hash: str, index: int = 1) -> Dict[str, Any]:
             "filename": filename,
             "duration": 0,
             "audio_tracks": [
-                {"id": 0, "codec": "aac", "title": "Основной звук (Русский дубляж)", "lang": "rus", "needs_transcode": True}
+                {"id": 0, "codec": "unknown", "title": "Основная дорожка", "lang": "und", "needs_transcode": True}
             ],
             "subtitle_tracks": []
         }
         return fallback
 
+def select_video_files(files: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], bool]:
+    """Prefer the main film over trailers; retain explicitly numbered episodes."""
+    videos = [f for f in files if f.get("is_video")]
+    if len(videos) < 2:
+        return videos, False
+    videos.sort(key=lambda f: f.get("size_bytes", 0), reverse=True)
+    largest = videos[0].get("size_bytes", 0)
+    substantial = [f for f in videos if not largest or f.get("size_bytes", 0) >= largest * 0.15]
+    episode_pattern = re.compile(r"(?:\bs\d{1,2}[ ._-]*e\d{1,3}\b|\b\d{1,2}x\d{1,3}\b|\b(?:episode|серия|ep)[ ._-]*\d{1,3}\b)", re.IGNORECASE)
+    numbered = [f for f in substantial if episode_pattern.search(f.get("path", "").replace("_", " "))]
+    if len(numbered) >= 2:
+        return numbered, True
+    return [videos[0]], False
+
+
 class TorrServerManager:
     def __init__(self):
         self.process: Optional[subprocess.Popen] = None
+        self._start_lock = threading.Lock()
         self.active_hash: Optional[str] = None
         self.download_limit_kb: int = 0
         self.upload_limit_kb: int = 50  # low upload by default to save user bandwidth
@@ -331,50 +348,22 @@ class TorrServerManager:
         If it's not running or the physical network IP changed (e.g. Wi-Fi reconnected),
         automatically restart TorrServer with the new physical IP and apply settings.
         """
-        iface, current_ip, _ = get_physical_net_info()
-        if not self.is_running() or (self.physical_ip and self.physical_ip != current_ip):
-            self.start()
-        return self.is_running()
+        with self._start_lock:
+            iface, current_ip, _ = get_physical_net_info()
+            running = self.is_running()
+            # Never restart a TorrServer owned by another application.
+            network_changed = self.process is not None and self.physical_ip != current_ip
+            if not running or network_changed:
+                self.start()
+            return self.is_running()
 
     def start(self):
         iface, ip, _ = get_physical_net_info()
-        need_restart = True
-        if self.is_running():
-            if sys.platform == "darwin":
-                try:
-                    pids = subprocess.check_output(['pgrep', '-f', 'TorrServer'], text=True).strip().split()
-                    has_dylib = False
-                    for p in pids:
-                        try:
-                            lsof_out = subprocess.check_output(['lsof', '-p', p], text=True)
-                            if 'bind_direct.dylib' in lsof_out:
-                                has_dylib = True
-                                break
-                        except Exception:
-                            pass
-                    if has_dylib and self.physical_ip == ip and self.physical_iface == iface:
-                        need_restart = False
-                except Exception:
-                    need_restart = True
-            else:
-                if self.physical_ip == ip:
-                    need_restart = False
-
-        if not need_restart:
+        if self.is_running() and self.process is None:
+            self.physical_iface, self.physical_ip = iface, ip
             return
-
-        self.stop()
-        if sys.platform == "win32":
-            try:
-                subprocess.run(["taskkill", "/F", "/IM", "TorrServer.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                subprocess.run(["taskkill", "/F", "/IM", "TorrServer-windows-amd64.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception:
-                pass
-        else:
-            try:
-                subprocess.run(["pkill", "-9", "-f", "TorrServer"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception:
-                pass
+        if self.process is not None:
+            self.stop()
         time.sleep(0.3)
 
         os.makedirs(TORRSERVER_DIR, exist_ok=True)
@@ -433,11 +422,11 @@ class TorrServerManager:
                 break
 
     def stop(self):
-        try:
-            self.drop_all_torrents()
-        except Exception:
-            pass
         if self.process:
+            try:
+                self.drop_all_torrents()
+            except Exception:
+                pass
             self.process.terminate()
             try:
                 self.process.wait(timeout=3)
@@ -517,8 +506,9 @@ class TorrServerManager:
 
     async def add_torrent(self, link: str, title: str = "Movie") -> Dict[str, Any]:
         """Add magnet link or torrent URL to TorrServer and return parsed info"""
-        self.start()
         import asyncio
+        if not await asyncio.to_thread(self.ensure_running):
+            raise RuntimeError("Не удалось запустить TorrServer")
 
         effective_link = link
         if effective_link.startswith("magnet:?"):
@@ -537,6 +527,8 @@ class TorrServerManager:
             res = await client.post(f"{TORRSERVER_URL}/torrents", json=payload)
             data = res.json()
             torrent_hash = data.get("hash")
+            if not torrent_hash:
+                raise RuntimeError("TorrServer не принял ссылку на раздачу")
             self.active_hash = torrent_hash
 
             # Poll for torrent metadata (file list) with non-blocking async sleep (up to 20s)
@@ -587,9 +579,11 @@ class TorrServerManager:
                     "is_video": is_video
                 })
 
-            video_files = [f for f in file_list if f["is_video"]]
-            is_series = len(video_files) > 1
-
+            video_files, is_series = select_video_files(file_list)
+            if not file_stats:
+                raise RuntimeError("Не удалось получить список файлов раздачи. Проверьте доступность пиров или выберите другую раздачу")
+            if not video_files:
+                raise RuntimeError("В этой раздаче нет видеофайлов. Выберите другую раздачу")
             seasons_dict = {}
             if is_series:
                 from backend.metadata import extract_season_info

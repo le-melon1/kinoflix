@@ -4,6 +4,7 @@ import re
 import shutil
 import platform
 import asyncio
+import math
 import urllib.parse
 from typing import Optional, List, Dict, Any
 import httpx
@@ -169,6 +170,48 @@ async def rutracker_set_cookie(req: RuTrackerCookieRequest):
         return {"success": True, "status": status}
     return {"success": False, "error": "Строка cookies должна содержать bb_session"}
 
+def release_identity(release: Dict[str, Any]) -> str:
+    magnet = release.get("magnet") or ""
+    match = re.search(r"(?:[?&])xt=urn:btih:([a-zA-Z0-9]+)", magnet, re.IGNORECASE)
+    if match:
+        return "hash:" + match.group(1).lower()
+    return "id:" + str(release.get("id", ""))
+
+
+def title_matches_search(release: Dict[str, Any], terms: List[str]) -> bool:
+    from backend.metadata import extract_movie_names
+
+    def normalize(value: str) -> str:
+        value = re.sub(r"[^\w]+", " ", (value or "").casefold()).strip()
+        return re.sub(r"^(?:the|a|an)\s+", "", value)
+
+    raw = release.get("title") or ""
+    parsed = extract_movie_names(raw)
+    candidates = [normalize(release.get("display_title") or ""),
+                  normalize(parsed.get("ru_title") or ""),
+                  normalize(parsed.get("en_title") or "")]
+    for term in terms:
+        wanted = normalize(term)
+        if not wanted:
+            continue
+        for candidate in candidates:
+            if candidate == wanted or candidate.startswith(wanted + " "):
+                return True
+    return False
+
+
+def playback_score(release: Dict[str, Any]) -> float:
+    title = (release.get("title") or "").lower()
+    score = math.log1p(max(0, release.get("seeds") or 0)) * 10
+    if any(x in title for x in ("1080p", "720p", "x264", "h264", "avc")):
+        score += 8
+    if any(x in title for x in ("2160p", "4k", "hevc", "x265", "remux")):
+        score -= 10
+    if release.get("audio") and release["audio"] != "Озвучка неизвестна":
+        score += 3
+    return score
+
+
 @app.get("/api/search")
 async def search(
     q: str = Query(..., min_length=1),
@@ -231,65 +274,52 @@ async def search(
     results = []
     seen_ids = set()
 
+    # Query title variants and enabled sources concurrently; one slow mirror
+    # should not multiply the total wait for every variant.
+    searches = []
     for q_term in search_terms:
-        # Search Rutor (sorted by seeds descending)
         if source in ("all", "rutor") and trackers.get("rutor", True):
-            rutor_results = await search_rutor(q_term, limit=limit, min_seeds=min_seeds)
-            for r in rutor_results:
-                if r["id"] not in seen_ids:
-                    seen_ids.add(r["id"])
-                    results.append(r)
-
-        # Search RuTracker if logged in or selected
+            searches.append(search_rutor(q_term, limit=limit, min_seeds=min_seeds))
         if source in ("all", "rutracker") and trackers.get("rutracker", True):
-            rutracker_results = await rutracker_client.search(q_term, limit=limit)
-            for r in rutracker_results:
-                if r["id"] not in seen_ids:
-                    seen_ids.add(r["id"])
-                    results.append(r)
-
-        # If we already found top releases with >= 15 seeds, we have sufficient health
-        if any(r.get("seeds", 0) >= 15 for r in results):
-            break
+            searches.append(rutracker_client.search(q_term, limit=limit))
+    for batch in await asyncio.gather(*searches, return_exceptions=True):
+        if isinstance(batch, BaseException):
+            continue
+        for release in batch:
+            if release["id"] not in seen_ids:
+                seen_ids.add(release["id"])
+                results.append(release)
 
     # STRICT FILTER: Never return dead torrents without seeds
     results = [r for r in results if r.get("seeds", 0) >= min_seeds]
 
-    # If results is still empty, check curated catalog magnet
-    if not results:
-        from backend.catalog import get_catalog_magnet
-        cat_mag = get_catalog_magnet(query) or get_catalog_magnet(online_info.get("ru_title"))
-        if cat_mag:
-            results.append({
-                "id": "catalog_direct",
-                "source": "KinoFlix Direct CDN",
-                "title": f"{online_info.get('ru_title') or query} [4K UHD / 1080p] [Дубляж]",
-                "magnet": cat_mag,
-                "torrent_url": "",
-                "size": "15-25 GB",
-                "seeds": 60,
-                "leeches": 5,
-                "date": "2024",
-                "quality": "4K UHD",
-                "audio": "Дубляж",
-                "details_url": ""
-            })
-
-    # Sort strictly by seeders descending
+    # Multiple indexes can return the same torrent under different IDs.
+    # Keep the entry with the best advertised seed count.
     results.sort(key=lambda x: x.get("seeds", 0), reverse=True)
+    unique = {}
+    for release in results:
+        unique.setdefault(release_identity(release), release)
+    results = list(unique.values())
 
     # Enrich each release with distinct artwork and title from TMDB
     results = await enrich_search_results(results)
 
+    # Keep exact title matches and sequels, without mixing in unrelated films
+    # whose episode or book title merely contains a common search word.
+    matching = [r for r in results if title_matches_search(r, search_terms + [query])]
+    if matching:
+        results = matching
+    results.sort(key=playback_score, reverse=True)
+
     has_seasons = any(r.get("season_label") for r in results)
-    is_tv = online_info.get("is_series", False) or has_seasons
+    is_tv = online_info.get("is_series", False) if online_info.get("year") else has_seasons
     max_season = max([r.get("season_end") or 1 for r in results if r.get("season_end")], default=1)
     duration_str = f"{max_season} Сезон{'а' if 1 < max_season < 5 else ('ов' if max_season >= 5 else '')}" if is_tv and max_season > 1 else ("1 Сезон" if is_tv else "2 ч 15 мин")
 
     movie_info = {
         "title": online_info.get("ru_title") or query,
         "original_title": online_info.get("orig_title") or query,
-        "year": (results[0].get("display_year") if results else None) or online_info.get("year") or "2024",
+        "year": online_info.get("year") or (results[0].get("display_year") if results else None) or "",
         "rating": online_info.get("rating") or "8.5",
         "poster": online_info.get("poster") or (results[0].get("poster") if results else None),
         "backdrop": online_info.get("backdrop") or (results[0].get("backdrop") if results else None),
@@ -300,12 +330,7 @@ async def search(
         "is_series": is_tv,
         "total_seasons": max_season
     }
-    verified_cards = curate_verified_editions(
-        results,
-        min_seeds=min_seeds,
-        preferred_quality=pref_quality,
-        preferred_audio=pref_audio
-    )
+    verified_cards = results[:2]
 
     return {
         "query": query,
@@ -318,7 +343,6 @@ async def search(
 
 @app.post("/api/stream/prepare")
 async def prepare_stream(req: StreamPrepareRequest, background_tasks: BackgroundTasks):
-    torrserver_mgr.ensure_running()
     magnet = req.magnet
     # If topic_id is provided, resolve magnet
     if not magnet and req.topic_id:
@@ -332,6 +356,9 @@ async def prepare_stream(req: StreamPrepareRequest, background_tasks: Background
             t_m = re.search(r'viewtopic\.php\?t=(\d+)', req.link)
             if t_m:
                 magnet = await rutracker_client.get_topic_magnet(t_m.group(1))
+
+    if not magnet and (req.topic_id or req.link):
+        raise HTTPException(status_code=400, detail="Не удалось получить ссылку выбранной раздачи. Попробуйте другую раздачу или проверьте вход в RuTracker")
 
     # Fast-path: check curated catalog for pre-resolved verified magnet
     if not magnet and req.title:
@@ -381,7 +408,6 @@ async def preload_stream(req: StreamPrepareRequest, background_tasks: Background
     Preloads the first seconds of a movie or TV show as soon as user opens its page.
     Enables instant 0-second latency playback when user clicks Play.
     """
-    torrserver_mgr.ensure_running()
     magnet = req.magnet
     if not magnet and req.topic_id:
         magnet = await rutracker_client.get_topic_magnet(req.topic_id)
@@ -393,6 +419,9 @@ async def preload_stream(req: StreamPrepareRequest, background_tasks: Background
             t_m = re.search(r'viewtopic\.php\?t=(\d+)', req.link)
             if t_m:
                 magnet = await rutracker_client.get_topic_magnet(t_m.group(1))
+
+    if not magnet and (req.topic_id or req.link):
+        raise HTTPException(status_code=400, detail="Не удалось получить ссылку выбранной раздачи. Попробуйте другую раздачу или проверьте вход в RuTracker")
 
     # Fast-path: check curated catalog
     if not magnet and req.title:
