@@ -152,6 +152,8 @@ def parse_series_episodes(video_files: List[Dict[str, Any]], default_season: int
             e_m = re.search(r'\d+x0*(\d+)', name, re.IGNORECASE)
         if not e_m:
             e_m = re.search(r'^[^\d]*0*(\d+)[.\s_-]', name)
+        if not e_m:
+            e_m = re.search(r'\s-\s0*(\d{1,3})(?:\s|[.\[_-])', name)
         if e_m:
             e_num = int(e_m.group(1))
 
@@ -160,7 +162,7 @@ def parse_series_episodes(video_files: List[Dict[str, Any]], default_season: int
         s = re.sub(r'^.*?\d+x\d+[\s._-]*', '', s)
         s = re.sub(r'^\d+[\s._-]+', '', s)
         s = re.sub(r'\.(mkv|mp4|avi|webm|ts|mov)$', '', s, flags=re.IGNORECASE)
-        s = re.sub(r'(?:bdrip|web-dl|webrip|dvdrip|hdtv|1080p|720p|2160p|4k|x264|x265|hevc|avc|lostfilm|hdrezka|rhs|newstudio|xvid|ac3|dts|mp3|aac|flac|rus|eng).*$', '', s, flags=re.IGNORECASE)
+        s = re.sub(r'(?:dual|bdrip|web-dl|webrip|dvdrip|hdtv|1080p|720p|2160p|4k|x264|x265|hevc|avc|lostfilm|hdrezka|rhs|newstudio|xvid|ac3|dts|mp3|aac|flac|rus|eng).*$', '', s, flags=re.IGNORECASE)
         s = re.sub(r'[\s._-]+', ' ', s).strip()
         if not s or len(s) < 2 or re.match(r'^(rus|eng|mkv|mp4|avi|xvid|ac3)$', s, re.IGNORECASE):
             title = f'Серия {e_num}'
@@ -321,6 +323,10 @@ def select_video_files(files: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]
     numbered = [f for f in substantial if episode_pattern.search(f.get("path", "").replace("_", " "))]
     if len(numbered) >= 2:
         return numbered, True
+    # Anime packs commonly use "Title - 01.mkv" rather than S01E01.
+    anime_numbered = [f for f in substantial if re.search(r"(?:^|\s-\s)\d{1,3}(?:\s|[.\[_-])", f.get("path", "").replace("\\", "/").split("/")[-1])]
+    if len(anime_numbered) >= 2:
+        return anime_numbered, True
     return [videos[0]], False
 
 

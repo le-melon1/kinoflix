@@ -108,7 +108,13 @@ def extract_movie_names(torrent_title: str) -> Dict[str, Optional[str]]:
     if dotted:
         return {"ru_title": dotted.group(1).replace(".", " ").strip(), "en_title": None, "year": dotted.group(2)}
 
-    return {"ru_title": torrent_title.split('/')[0].strip(), "en_title": None, "year": None}
+    # Scene releases often have no year or parentheses: strip the season,
+    # episode and encoding suffix before looking up or grouping the title.
+    raw = torrent_title.split('/')[0].strip()
+    base = re.split(r'(?:[. _-]+(?:S\d{1,2}(?:E\d{1,3})?|(?:season|сезон)[. _-]*\d{1,2}|\d{1,2}x\d{1,3}|2160p|1080p|720p|WEB[- .]?DL|WEBRip|BluRay|BDRip)(?:[. _-]|$))', raw, maxsplit=1, flags=re.IGNORECASE)[0]
+    base = re.sub(r'[._]+', ' ', base)
+    base = re.sub(r'\s*[-–]\s*', ' ', base)
+    return {"ru_title": re.sub(r'\s+', ' ', base).strip() or raw, "en_title": None, "year": None}
 
 def extract_season_info(title: str):
     """
@@ -373,8 +379,8 @@ async def enrich_search_results(results: List[Dict[str, Any]]) -> List[Dict[str,
         item["is_multi_season"] = is_multi
 
         if s_label:
-            item["display_title"] = f"{base_title} • {s_label}"
-            item["display_year"] = t_year or (meta["display_year"] if meta else "")
+            item["display_title"] = base_title
+            item["display_year"] = (meta["display_year"] if meta and meta.get("media_type") == "tv" else t_year) or (meta["display_year"] if meta else "")
             item["is_series"] = True
         else:
             item["display_title"] = base_title

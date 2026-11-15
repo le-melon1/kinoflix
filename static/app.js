@@ -1970,7 +1970,7 @@ async function openMovieDetails(movieOrId) {
     const top = verified.find(r => r.is_multi_season) || verified[0] || results[0];
     const isSeries = state.activeMovie.is_series || (top && (top.title.toLowerCase().includes('сезон') || top.title.toLowerCase().includes('сери') || top.title.toLowerCase().includes('s0')));
     if (isSeries && top) {
-      loadEpisodesForModal(top, state.activeMovie);
+      loadBestEpisodesForModal(state.activeMovie, 1);
     } else if (top) {
       preloadStream(top);
     }
@@ -2024,9 +2024,30 @@ function openMovieDetailsWithTorrents(movie, verified, allResults) {
   const top = (verified && (verified.find(r => r.is_multi_season) || verified[0])) || (allResults && allResults[0]);
   const isSeries = movie.is_series || (top && (top.title.toLowerCase().includes('сезон') || top.title.toLowerCase().includes('сери') || top.title.toLowerCase().includes('s0')));
   if (isSeries && top) {
-    loadEpisodesForModal(top, movie);
+    loadBestEpisodesForModal(movie, 1);
   } else if (top) {
     preloadStream(top);
+  }
+}
+
+async function loadBestEpisodesForModal(movie, season = 1) {
+  const candidates = [...(state.modalAllResults || []), ...(state.modalVerified || [])];
+  const seen = new Set();
+  const ordered = candidates.filter(r => {
+    const key = r.magnet || r.topic_id || r.id;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return !r.season_start || !r.season_end || (r.season_start <= season && r.season_end >= season);
+  }).sort((a, b) => {
+    const score = r => (r.season_start === season ? 10 : 0) + (r.is_multi_season ? 5 : 0) - (/s\d{1,2}[ ._-]*e\d{1,3}|\d{1,2}x\d{1,3}/i.test(r.title || "") ? 30 : 0);
+    return score(b) - score(a);
+  });
+  for (const candidate of ordered.slice(0, 3)) {
+    if (state.activeMovie !== movie) return;
+    if (await loadEpisodesForModal(candidate, movie, season)) return;
+  }
+  if (state.activeMovie === movie) {
+    modalEpisodesGrid.innerHTML = '<div style="color:#aaa; padding:16px;">Не удалось автоматически загрузить серии. Попробуйте другую раздачу ниже.</div>';
   }
 }
 
@@ -2053,6 +2074,8 @@ async function loadEpisodesForModal(item, movie, preferredSeason = null) {
     });
     if (!res.ok) throw new Error('Не удалось получить файлы торрента');
     const data = await res.json();
+    if (state.activeMovie !== movie) return false;
+    if (!data.is_series && (data.video_files || []).length < 2) throw new Error('В раздаче не найден список серий');
     state.modalTorrentItem = item;
     state.modalTorrentData = data;
     state.preloadedTorrentItem = item;
@@ -2091,12 +2114,13 @@ async function loadEpisodesForModal(item, movie, preferredSeason = null) {
       }
 
       renderModalEpisodesList(movie);
-    } else {
-      modalEpisodesSection.style.display = 'none';
+      return true;
     }
+    return false;
   } catch (err) {
     console.error('Modal episodes load error:', err);
-    modalEpisodesSection.style.display = 'none';
+    if (state.activeMovie === movie) modalEpisodesGrid.innerHTML = '<div style="color:#aaa; padding:16px;">Не удалось получить серии из этой раздачи. Попробуйте другую.</div>';
+    return false;
   }
 }
 
@@ -2108,27 +2132,13 @@ async function switchModalSeason(s) {
     return;
   }
 
-  // 2. Otherwise find a release specifically matching this season in verified / all results
-  const sNum = parseInt(s);
-  const candidates = [...(state.modalVerified || []), ...(state.modalAllResults || [])];
-  const targetRel = candidates.find(r => {
-    if (r === state.modalTorrentItem) return false;
-    if (r.season_start && r.season_end && sNum >= r.season_start && sNum <= r.season_end) return true;
-    if (r.season_label && r.season_label.includes(`Сезон ${sNum}`)) return true;
-    const t = (r.title || '').toLowerCase();
-    return t.includes(`s0${sNum}`) || t.includes(`s${sNum}`) || t.includes(`${sNum} сезон`) || t.includes(`сезон ${sNum}`);
-  });
-
-  if (targetRel) {
-    await loadEpisodesForModal(targetRel, state.activeMovie, s);
-  } else {
-    renderModalEpisodesList(state.activeMovie);
-  }
+  // Try suitable complete releases for the requested season automatically.
+  await loadBestEpisodesForModal(state.activeMovie, parseInt(s, 10));
 }
 
 function renderModalEpisodesList(movie) {
   const eps = (state.modalSeasons && Object.keys(state.modalSeasons).length > 0)
-    ? (state.modalSeasons[state.currentModalSeason] || Object.values(state.modalSeasons)[0] || [])
+    ? (state.modalSeasons[state.currentModalSeason] || [])
     : state.modalVideoFiles;
 
   if (modalEpisodeCount) {

@@ -672,7 +672,7 @@ async def stream_browser_audio(
     Includes sample-accurate aresample synchronization to prevent audio lag.
     """
     torr_url = f"http://127.0.0.1:8090/stream/stream.mkv?link={link}&index={index}&play"
-    ffmpeg_bin = FFMPEG_BIN
+    ffmpeg_bin = get_ffmpeg_bin()
 
     audio_idx = audio
     video_args = ["-c:v", "copy"]
