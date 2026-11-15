@@ -25,3 +25,13 @@ class SeriesSearchTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class VideoProbeTests(unittest.TestCase):
+    def test_probe_failure_does_not_assume_h264(self):
+        from unittest.mock import patch
+        from backend.torrserver import probe_media_tracks
+        with patch('backend.torrserver.httpx.post', side_effect=OSError('offline')), \
+             patch('backend.torrserver.subprocess.check_output', side_effect=OSError('missing ffprobe')):
+            result = probe_media_tracks('missing_probe_test', 1)
+        self.assertEqual(result['video_codec'], 'unknown')
+        self.assertEqual(result['height'], 0)

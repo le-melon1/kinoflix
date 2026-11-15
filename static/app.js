@@ -15,7 +15,7 @@ const state = {
   modalSeasons: {},
   modalVideoFiles: [],
   audioMode: 'aac', // 'aac' or 'direct'
-  activeAudioTrack: 0,
+  activeAudioTrack: null,
   audioTracks: [],
   audioSyncOffset: 0,
   availableDubbings: [],
@@ -2283,8 +2283,8 @@ function renderModalEditions(verifiedList, allList) {
           <div class="edition-details-text">${escapeHtml(item.curated_desc || item.title)}</div>
           <div class="edition-tags-row">
             ${getSeedPill(item.seeds)}
-            <span class="ed-pill">${item.quality || 'HD'}</span>
-            <span class="ed-pill">${escapeHtml(item.audio || 'Дубляж')}</span>
+            <span class="ed-pill">${escapeHtml(item.quality || 'Качество не указано')}</span>
+            <span class="ed-pill">${escapeHtml(item.audio || 'Язык не указан')}</span>
             <span class="ed-pill">💾 ${item.size}</span>
           </div>
         </div>
@@ -2350,8 +2350,8 @@ function showAllTorrentReleases(passedList) {
             ${getSeedPill(item.seeds)}
             ${item.season_label ? `<span class="ed-pill" style="color:#e5a00d; font-weight:700;">${escapeHtml(item.season_label)}</span>` : ''}
             <span class="ed-pill">${item.source}</span>
-            <span class="ed-pill">${item.quality || 'HD'}</span>
-            <span class="ed-pill">${escapeHtml(item.audio || 'Звук')}</span>
+            <span class="ed-pill">${escapeHtml(item.quality || 'Качество не указано')}</span>
+            <span class="ed-pill">${escapeHtml(item.audio || 'Язык не указан')}</span>
             <span class="ed-pill">💾 ${item.size}</span>
           </div>
         </div>
@@ -2407,10 +2407,10 @@ function getStreamUrlForFile(hash, fileId) {
     return `http://127.0.0.1:8090/stream/${encodeURIComponent(fname)}?link=${hash}&index=${fileId}&play`;
   } else {
     // Guaranteed sound in Google Chrome/Safari with on-the-fly AAC audio transmuxing
-    const audioIdx = state.activeAudioTrack || 0;
+    const audioParam = state.activeAudioTrack == null ? '' : `&audio=${state.activeAudioTrack}`;
     const ssParam = (state.currentSeekOffset && state.currentSeekOffset > 0) ? `&ss=${state.currentSeekOffset}` : '';
     const delayParam = (state.audioSyncOffset && Math.abs(state.audioSyncOffset) >= 0.02) ? `&audio_delay=${state.audioSyncOffset}` : '';
-    return `/api/stream/browser?link=${hash}&index=${fileId}&audio=${audioIdx}${ssParam}${delayParam}`;
+    return `/api/stream/browser?link=${hash}&index=${fileId}${audioParam}${ssParam}${delayParam}`;
   }
 }
 
@@ -2446,11 +2446,11 @@ function preloadStream(item, fileId = null) {
 
 async function tryNextStartupRelease(item, playbackSequence) {
   if (!state.fallbackEnabled || state.fallbackInFlight || playbackSequence !== state.playbackSequence || state.attemptedReleases.length >= 2) return false;
-  const currentAudio = item.audio || 'Озвучка неизвестна';
+  const currentAudio = item.audio || 'Язык не указан';
   const candidates = state.modalAllResults || [];
   const next = candidates.find(candidate =>
     !state.attemptedReleases.some(previous => sameRelease(previous, candidate)) &&
-    (currentAudio === 'Озвучка неизвестна' || candidate.audio === currentAudio)
+    (['Озвучка неизвестна', 'Язык не указан'].includes(currentAudio) || candidate.audio === currentAudio)
   );
   if (!next) return false;
   state.fallbackInFlight = true;
@@ -2480,7 +2480,7 @@ async function startNetflixStream(item, episodeFileId = null, initialSeekTime = 
   cancelNextEpisodeCountdown();
   netflixPlayerView.style.display = 'flex';
   playerTitle.textContent = item.curated_category || item.title;
-  playerSubtitle.textContent = `${item.quality || 'HD'} • ${item.audio || 'Дубляж'} • Прямой поток`;
+  playerSubtitle.textContent = `${item.quality || 'Качество не указано'} • ${item.audio || 'Язык не указан'} • Прямой поток`;
   playerSpinner.style.display = 'flex';
   spinnerText.textContent = initialSeekTime > 0 ? 'Переключение озвучки...' : 'Подключение к раздаче...';
 
@@ -2506,6 +2506,7 @@ async function startNetflixStream(item, episodeFileId = null, initialSeekTime = 
   if (cleanTitle) {
     state.activeMovieTitle = cleanTitle;
   }
+  if (!sameRelease(state.activeTorrentItem, item)) state.activeAudioTrack = null;
   state.activeTorrentItem = item;
 
   if (initialSeekTime === 0) {
@@ -2848,6 +2849,12 @@ async function loadAudioTracks(hash, fileId, attempt = 0) {
     const data = await res.json();
     if (hash !== state.activeTorrentHash || fileId !== state.activeFileIndex) return;
     state.audioTracks = data.audio_tracks || [];
+    if (data.video_codec && data.video_codec !== 'unknown' && state.activeTorrentItem) {
+      const resolution = data.width && data.height ? `${data.width}×${data.height}` : (state.activeTorrentItem.quality || 'Качество не указано');
+      const knownLanguages = [...new Set(state.audioTracks.map(t => t.lang && t.lang !== 'und' ? t.lang.toUpperCase() : '').filter(Boolean))];
+      const language = knownLanguages.length ? knownLanguages.join(', ') : (state.activeTorrentItem.audio || 'Язык не указан');
+      playerSubtitle.textContent = `${resolution} • ${language} • Прямой поток`;
+    }
     renderAudioTracksMenu();
     state.subtitleTracks = data.subtitle_tracks || [];
     renderSubtitlesMenu();
@@ -2933,7 +2940,7 @@ function renderAudioTracksMenu() {
     return;
   }
   audioTracksHeader.style.display = 'block';
-  audioTracksList.innerHTML = state.audioTracks.map((tr, idx) => `
+  audioTracksList.innerHTML = `<div class="n-drop-item ${state.activeAudioTrack === null ? 'active' : ''}" onclick="switchAudioTrack(null)">Автоматически (предпочтительно русский)</div>` + state.audioTracks.map((tr, idx) => `
     <div class="n-drop-item ${idx === state.activeAudioTrack ? 'active' : ''}" onclick="switchAudioTrack(${idx})">
       ${tr.lang ? `[${tr.lang.toUpperCase()}] ` : ''}${escapeHtml(tr.title || 'Дорожка ' + (idx + 1))}
       ${tr.codec ? `<small style="opacity:0.7;"> (${tr.codec.toUpperCase()})</small>` : ''}

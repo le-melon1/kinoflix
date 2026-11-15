@@ -296,7 +296,7 @@ def playback_score(release: Dict[str, Any]) -> float:
         score += 8
     if any(x in title for x in ("2160p", "4k", "hevc", "x265", "remux")):
         score -= 10
-    if release.get("audio") and release["audio"] != "Озвучка неизвестна":
+    if release.get("audio") and release["audio"] not in ("Озвучка неизвестна", "Язык не указан"):
         score += 3
     return score
 
@@ -738,15 +738,9 @@ async def stream_browser_audio(
         except Exception:
             pass
 
-        if fname.endswith((".avi", ".wmv", ".vob", ".flv", ".mpg", ".mpeg", ".divx")):
-            video_args = [
-                "-c:v", "h264_videotoolbox",
-                "-b:v", "4500k",
-                "-pix_fmt", "yuv420p",
-                "-realtime", "true"
-            ]
-        else:
-            video_args = ["-c:v", "copy"]
+        # Unknown streams must be converted instead of assuming H.264.
+        video_args = ["-c:v", "libx264", "-preset", "ultrafast",
+                      "-tune", "zerolatency", "-b:v", "4000k", "-pix_fmt", "yuv420p"]
 
     cmd = [
         ffmpeg_bin,

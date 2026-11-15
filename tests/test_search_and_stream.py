@@ -15,7 +15,9 @@ class SearchMetadataTests(unittest.TestCase):
         self.assertTrue(is_non_video_release('The Martian by Andy Weir EPUB'))
         self.assertTrue(is_non_video_release('The Martian audiobook.mp3'))
         self.assertFalse(is_non_video_release('The Martian 2015 1080p AAC'))
-        self.assertEqual(parse_audio('The Martian (2015)'), 'Озвучка неизвестна')
+        self.assertEqual(parse_audio('The Martian (2015)'), 'Язык не указан')
+        self.assertEqual(parse_audio('Cyberpunk ENG JAP 1080p'), 'Английский, Японский')
+        self.assertEqual(parse_audio('Cyberpunk DUAL 1080p'), 'Две дорожки, языки неизвестны')
 
     def test_release_ranking_prefers_compatible_format_with_similar_seeds(self):
         compatible = {'title': 'Movie 1080p x264', 'seeds': 50}

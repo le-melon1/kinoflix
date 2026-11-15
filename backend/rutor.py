@@ -64,7 +64,7 @@ def parse_quality(title: str) -> str:
         return "WEB-DL"
     if "DVDRIP" in title_upper:
         return "DVDRip"
-    return "HD"
+    return "Качество не указано"
 
 def parse_audio(title: str) -> str:
     title_lower = title.lower()
@@ -81,9 +81,19 @@ def parse_audio(title: str) -> str:
         audios.append("Кубик в Кубе")
     if "многоголос" in title_lower or " | p |" in title_lower or " | p," in title_lower:
         audios.append("MVO")
-    if "оригинал" in title_lower or "sub" in title_lower or "субтитр" in title_lower:
-        audios.append("Субтитры")
-    return ", ".join(audios) if audios else "Озвучка неизвестна"
+    if "оригинал" in title_lower:
+        audios.append("Оригинальная озвучка")
+    # These are release-name hints, not confirmed track metadata.
+    language_tokens = set(re.findall(r"[a-zа-яё]+", title_lower))
+    if language_tokens & {"rus", "russian", "рус", "русский", "russkiy"}:
+        audios.append("Русский")
+    if language_tokens & {"eng", "english", "английский"}:
+        audios.append("Английский")
+    if language_tokens & {"jpn", "jap", "japanese", "японский"}:
+        audios.append("Японский")
+    if "dual" in language_tokens and not any(x in audios for x in ("Русский", "Английский", "Японский")):
+        audios.append("Две дорожки, языки неизвестны")
+    return ", ".join(audios) if audios else "Язык не указан"
 
 def is_non_video_release(name: str) -> bool:
     """Discard explicitly identified books and audio-only releases."""

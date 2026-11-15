@@ -244,14 +244,14 @@ def probe_media_tracks(torrent_hash: str, index: int = 1) -> Dict[str, Any]:
         subtitle_tracks = []
         video_codec = None
         pix_fmt = "yuv420p"
-        width = 1920
-        height = 1080
+        width = 0
+        height = 0
         for s in data.get("streams", []):
             if s.get("codec_type") == "video" and not video_codec:
                 video_codec = (s.get("codec_name") or "").lower()
                 pix_fmt = (s.get("pix_fmt") or "yuv420p").lower()
-                width = int(s.get("width") or 1920)
-                height = int(s.get("height") or 1080)
+                width = int(s.get("width") or 0)
+                height = int(s.get("height") or 0)
             elif s.get("codec_type") == "audio":
                 idx = len(audio_tracks)
                 c = s.get("codec_name", "ac3")
@@ -278,10 +278,8 @@ def probe_media_tracks(torrent_hash: str, index: int = 1) -> Dict[str, Any]:
         duration = float(data.get("format", {}).get("duration", 0) or 0)
 
         if not video_codec:
-            if filename.lower().endswith((".avi", ".wmv", ".flv", ".vob", ".mpg", ".mpeg", ".divx")):
-                video_codec = "mpeg4"
-            else:
-                video_codec = "h264"
+            # Do not guess: an unknown codec may be HEVC or 10-bit H.264.
+            video_codec = "unknown"
 
         res_dict = {
             "video_codec": video_codec,
@@ -298,10 +296,10 @@ def probe_media_tracks(torrent_hash: str, index: int = 1) -> Dict[str, Any]:
     except Exception as e:
         is_legacy = filename.lower().endswith((".avi", ".wmv", ".flv", ".vob", ".mpg", ".mpeg", ".divx"))
         fallback = {
-            "video_codec": "mpeg4" if is_legacy else "h264",
+            "video_codec": "mpeg4" if is_legacy else "unknown",
             "pix_fmt": "yuv420p",
-            "width": 1920,
-            "height": 1080,
+            "width": 0,
+            "height": 0,
             "filename": filename,
             "duration": 0,
             "audio_tracks": [
