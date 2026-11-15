@@ -238,7 +238,7 @@ def probe_media_tracks(torrent_hash: str, index: int = 1) -> Dict[str, Any]:
         media_url
     ]
     try:
-        res = subprocess.check_output(cmd, timeout=4.0)
+        res = subprocess.check_output(cmd, timeout=8.0)
         data = json.loads(res)
         audio_tracks = []
         subtitle_tracks = []
