@@ -4780,3 +4780,200 @@ function tvOpenSearchPrompt() {
     }
   }
 }
+
+// ==========================================
+// ONLINE SOURCES INTEGRATION (VK & RUTUBE)
+// ==========================================
+
+window.switchModalSourceTab = function(tab) {
+  const btnP2p = document.getElementById('tabSourceP2p');
+  const btnVk = document.getElementById('tabSourceVk');
+  const btnRutube = document.getElementById('tabSourceRutube');
+  const listP2p = document.getElementById('modalEditionsList');
+  const listOnline = document.getElementById('modalOnlineList');
+
+  // Reset styles
+  [btnP2p, btnVk, btnRutube].forEach(btn => {
+    if (!btn) return;
+    btn.style.background = 'rgba(255,255,255,0.08)';
+    btn.style.border = '1px solid rgba(255,255,255,0.2)';
+    btn.style.color = '#ccc';
+  });
+
+  if (tab === 'p2p') {
+    if (btnP2p) {
+      btnP2p.style.background = 'rgba(229,9,20,0.25)';
+      btnP2p.style.border = '1px solid #e50914';
+      btnP2p.style.color = '#fff';
+    }
+    if (listP2p) listP2p.style.display = 'flex';
+    if (listOnline) listOnline.style.display = 'none';
+  } else if (tab === 'vk') {
+    if (btnVk) {
+      btnVk.style.background = 'rgba(0,119,255,0.3)';
+      btnVk.style.border = '1px solid #0077ff';
+      btnVk.style.color = '#fff';
+    }
+    if (listP2p) listP2p.style.display = 'none';
+    if (listOnline) listOnline.style.display = 'flex';
+    loadOnlineSource('vk');
+  } else if (tab === 'rutube') {
+    if (btnRutube) {
+      btnRutube.style.background = 'rgba(0,168,255,0.25)';
+      btnRutube.style.border = '1px solid #00a8ff';
+      btnRutube.style.color = '#fff';
+    }
+    if (listP2p) listP2p.style.display = 'none';
+    if (listOnline) listOnline.style.display = 'flex';
+    loadOnlineSource('rutube');
+  }
+};
+
+async function loadOnlineSource(source) {
+  const listOnline = document.getElementById('modalOnlineList');
+  if (!listOnline || !state.activeMovie) return;
+
+  const movie = state.activeMovie;
+  const title = movie.title || '';
+  const year = movie.year || '';
+  const query = `${title} ${year}`.trim();
+
+  listOnline.innerHTML = `
+    <div style="padding: 24px; text-align: center; color: #aaa; width: 100%;">
+      <div class="n-spinner-arc" style="display: inline-block; width: 28px; height: 28px; margin-bottom: 8px;"></div>
+      <div>Поиск чистого видеопотока на ${source === 'vk' ? 'VK Видео' : 'Rutube'}...</div>
+    </div>
+  `;
+
+  try {
+    const res = await fetch(`/api/online/${source}?query=${encodeURIComponent(query)}`);
+    if (!res.ok) throw new Error('Ошибка сервера');
+    const items = await res.json();
+
+    if (!items || !items.length) {
+      listOnline.innerHTML = `
+        <div style="padding: 24px; text-align: center; color: #888; width: 100%;">
+          Ничего не найдено в ${source === 'vk' ? 'VK Видео' : 'Rutube'}. Попробуйте вкладку "KinoFlix P2P".
+        </div>
+      `;
+      return;
+    }
+
+    listOnline.innerHTML = '';
+    items.forEach(it => {
+      const card = document.createElement('div');
+      card.className = 'edition-card';
+      card.style.cursor = 'pointer';
+      card.style.display = 'flex';
+      card.style.alignItems = 'center';
+      card.style.gap = '14px';
+      card.style.padding = '12px 16px';
+      card.style.background = 'rgba(255,255,255,0.05)';
+      card.style.borderRadius = '8px';
+      card.style.border = '1px solid rgba(255,255,255,0.1)';
+      card.style.marginBottom = '8px';
+      card.style.transition = 'background 0.2s, border-color 0.2s';
+
+      card.onmouseenter = () => {
+        card.style.background = source === 'vk' ? 'rgba(0,119,255,0.18)' : 'rgba(0,168,255,0.18)';
+        card.style.borderColor = source === 'vk' ? '#0077ff' : '#00a8ff';
+      };
+      card.onmouseleave = () => {
+        card.style.background = 'rgba(255,255,255,0.05)';
+        card.style.borderColor = 'rgba(255,255,255,0.1)';
+      };
+
+      const thumb = it.thumbnail ? `<img src="${it.thumbnail}" style="width: 80px; height: 50px; object-fit: cover; border-radius: 4px;" onerror="this.style.display='none'">` : '';
+      const dur = it.duration_str || (it.duration ? Math.round(it.duration / 60) + ' мин' : '');
+
+      card.innerHTML = `
+        ${thumb}
+        <div style="flex: 1; min-width: 0;">
+          <div style="color: #fff; font-weight: 600; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+            ${it.title}
+          </div>
+          <div style="color: #888; font-size: 0.8rem; margin-top: 3px; display: flex; align-items: center; gap: 8px;">
+            <span style="color: ${source === 'vk' ? '#0077ff' : '#00a8ff'}; font-weight: 700;">
+              ${source === 'vk' ? '🔷 VK Видео' : '🔶 Rutube'}
+            </span>
+            ${dur ? `<span>• ⏳ ${dur}</span>` : ''}
+            <span style="color: #4cd137;">✔ Без рекламы</span>
+          </div>
+        </div>
+        <button style="background: ${source === 'vk' ? '#0077ff' : '#00a8ff'}; color: #fff; border: none; padding: 6px 14px; border-radius: 4px; font-weight: 700; cursor: pointer;">
+          ▶ Смотреть
+        </button>
+      `;
+
+      card.onclick = () => playOnlineVideo(source, it.id, it.title);
+      listOnline.appendChild(card);
+    });
+  } catch (e) {
+    listOnline.innerHTML = `
+      <div style="padding: 20px; text-align: center; color: #ff5252;">
+        Ошибка загрузки данных: ${e.message}
+      </div>
+    `;
+  }
+}
+
+async function playOnlineVideo(source, id, title) {
+  closeDetailModal();
+  netflixPlayerView.style.display = 'flex';
+  playerTitle.textContent = title;
+  playerSubtitle.textContent = `${source === 'vk' ? 'VK Видео' : 'Rutube'} • Без рекламы`;
+  playerSpinner.style.display = 'flex';
+  spinnerText.textContent = 'Извлечение прямого потока...';
+
+  try {
+    const res = await fetch(`/api/online/${source}/stream?id=${encodeURIComponent(id)}`);
+    if (!res.ok) throw new Error('Не удалось получить поток');
+    const data = await res.json();
+    const streamUrl = data.stream_url;
+
+    if (!streamUrl) throw new Error('Пустая ссылка на видео');
+    startDirectStream(streamUrl, title, `${source === 'vk' ? 'VK Видео' : 'Rutube'} • Без рекламы`);
+  } catch (err) {
+    spinnerText.textContent = `Ошибка: ${err.message}`;
+    setTimeout(() => { playerSpinner.style.display = 'none'; }, 3000);
+  }
+}
+
+function startDirectStream(streamUrl, title, subtitle) {
+  playerTitle.textContent = title;
+  playerSubtitle.textContent = subtitle;
+
+  netflixVideo.pause();
+  netflixVideo.removeAttribute('src');
+  netflixVideo.load();
+
+  if (window.currentHlsInstance) {
+    window.currentHlsInstance.destroy();
+    window.currentHlsInstance = null;
+  }
+
+  const isHls = streamUrl.includes('.m3u8');
+  if (isHls && window.Hls && Hls.isSupported()) {
+    const hls = new Hls({ enableWorker: true });
+    window.currentHlsInstance = hls;
+    hls.loadSource(streamUrl);
+    hls.attachMedia(netflixVideo);
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      playerSpinner.style.display = 'none';
+      netflixVideo.play().catch(e => console.log('HLS play error:', e));
+    });
+    hls.on(Hls.Events.ERROR, (event, data) => {
+      if (data.fatal) {
+        console.error('Fatal HLS error:', data);
+        playerSpinner.style.display = 'none';
+      }
+    });
+  } else {
+    netflixVideo.src = streamUrl;
+    netflixVideo.oncanplay = () => {
+      playerSpinner.style.display = 'none';
+      netflixVideo.play().catch(e => console.log('Video play error:', e));
+    };
+  }
+}
+

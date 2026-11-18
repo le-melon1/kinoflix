@@ -1,0 +1,12 @@
+.git
+.venv
+venv
+.tools
+__pycache__
+*.pyc
+.DS_Store
+._*
+*.log
+bin/TorrServer*
+dist
+build

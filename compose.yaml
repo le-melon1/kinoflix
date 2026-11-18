@@ -1,0 +1,15 @@
+services:
+  kinoflix:
+    build: .
+    container_name: kinoflix
+    restart: unless-stopped
+    ports:
+      - "${PORT:-7890}:7890"
+      - "${TORRSERVER_PORT:-8090}:8090"
+    volumes:
+      - kinoflix-config:/root/.config/kinoflix
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  kinoflix-config:

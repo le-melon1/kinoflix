@@ -21,6 +21,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 </head>
 <body class="netflix-body">
 
@@ -399,11 +400,27 @@
               <span class="editions-crown">👑</span>
               <h3>Доступные варианты качества и озвучки</h3>
             </div>
-            <span class="editions-subtitle">Выберите подходящую раздачу; скорость зависит от доступных пиров</span>
+            <span class="editions-subtitle">Выберите источник: торренты P2P или мгновенный онлайн из VK/Rutube без рекламы</span>
+          </div>
+
+          <!-- Source Selection Tabs -->
+          <div class="source-tabs-bar" style="display: flex; gap: 10px; margin: 14px 0; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 12px; overflow-x: auto;">
+            <button class="source-tab-btn active" id="tabSourceP2p" onclick="switchModalSourceTab('p2p')" style="background: rgba(229,9,20,0.25); border: 1px solid #e50914; color: #fff; padding: 8px 16px; border-radius: 6px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+              <span>👑 KinoFlix P2P</span>
+            </button>
+            <button class="source-tab-btn" id="tabSourceVk" onclick="switchModalSourceTab('vk')" style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2); color: #ccc; padding: 8px 16px; border-radius: 6px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+              <span>🔷 VK Видео (Без рекламы)</span>
+            </button>
+            <button class="source-tab-btn" id="tabSourceRutube" onclick="switchModalSourceTab('rutube')" style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2); color: #ccc; padding: 8px 16px; border-radius: 6px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+              <span>🔶 Rutube (Без рекламы)</span>
+            </button>
           </div>
 
           <div class="editions-list" id="modalEditionsList">
-            <!-- Rendered by app.js -->
+            <!-- Rendered by app.js for P2P -->
+          </div>
+          <div class="editions-list" id="modalOnlineList" style="display: none;">
+            <!-- Rendered by app.js for VK and Rutube -->
           </div>
         </div>
 

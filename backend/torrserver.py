@@ -10,7 +10,11 @@ import platform
 import threading
 import urllib.parse
 from typing import Optional, Dict, Any, List, Tuple
-import httpx
+try:
+    import httpx
+except ImportError:
+    httpx = None
+
 
 if getattr(sys, "frozen", False):
     BASE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -464,7 +468,7 @@ class TorrServerManager:
             settings = {
                 "CacheSize": cache_bytes,
                 "ReaderReadAHead": 95,
-                "PreloadCache": 25,
+                "PreloadCache": 5,             # 5% buffer (~12MB) for near-instant seek response
                 "UseDisk": False,              # Stream strictly in RAM
                 "ConnectionsLimit": 120,       # Up to 120 peer connections
                 "DownloadRateLimit": down_limit,
@@ -508,7 +512,7 @@ class TorrServerManager:
         _probe_cache.clear()
         return {"status": "ok", "cleared_tracks_cache": cleared_entries}
 
-    async def add_torrent(self, link: str, title: str = "Movie") -> Dict[str, Any]:
+    async def add_torrent(self, link: str, title: str = "Movie", target_season: Optional[int] = None, target_episode: Optional[int] = None, duration: Optional[int] = None) -> Dict[str, Any]:
         """Add magnet link or torrent URL to TorrServer and return parsed info"""
         import asyncio
         if not await asyncio.to_thread(self.ensure_running):
@@ -554,16 +558,23 @@ class TorrServerManager:
                     itorrents_attempted = True
                     try:
                         import base64
-                        itorr_url = f"https://itorrents.org/torrent/{torrent_hash}.torrent"
-                        r_torr = await client.get(itorr_url, headers={"User-Agent": "Mozilla/5.0"}, follow_redirects=True, timeout=4.0)
-                        if r_torr.status_code == 200 and len(r_torr.content) > 50:
-                            b64 = base64.b64encode(r_torr.content).decode("ascii")
-                            await client.post(f"{TORRSERVER_URL}/torrents", json={
-                                "action": "add",
-                                "link": f"data:application/x-bittorrent;base64,{b64}",
-                                "title": title,
-                                "save_to_db": False
-                            }, timeout=3.0)
+                        for itorr_url in [
+                            f"https://itorrents.net/torrent/{torrent_hash}.torrent",
+                            f"https://itorrents.org/torrent/{torrent_hash}.torrent"
+                        ]:
+                            try:
+                                r_torr = await client.get(itorr_url, headers={"User-Agent": "Mozilla/5.0"}, follow_redirects=True, timeout=4.0)
+                                if r_torr.status_code == 200 and len(r_torr.content) > 50:
+                                    b64 = base64.b64encode(r_torr.content).decode("ascii")
+                                    await client.post(f"{TORRSERVER_URL}/torrents", json={
+                                        "action": "add",
+                                        "link": f"data:application/x-bittorrent;base64,{b64}",
+                                        "title": title,
+                                        "save_to_db": False
+                                    }, timeout=3.0)
+                                    break
+                            except Exception:
+                                continue
                     except Exception:
                         pass
 
@@ -598,9 +609,18 @@ class TorrServerManager:
                     enriched_video_files.extend(seasons_dict[s_k])
                 if enriched_video_files:
                     video_files = enriched_video_files
-                # First episode of first season is default
-                first_season = next(iter(seasons_dict.values()), [])
-                default_file = first_season[0] if first_season else video_files[0]
+
+                # Locate the requested episode file
+                target_season_str = str(target_season) if target_season else None
+                season_candidates = seasons_dict.get(target_season_str) if target_season_str else None
+                if not season_candidates:
+                    season_candidates = next(iter(seasons_dict.values()), []) if seasons_dict else video_files
+
+                default_file = None
+                if target_episode is not None:
+                    default_file = next((f for f in season_candidates if f.get("episode") == target_episode), None)
+                if not default_file:
+                    default_file = season_candidates[0] if season_candidates else video_files[0]
                 default_index = default_file["id"]
             else:
                 video_files.sort(key=lambda x: x["size_bytes"], reverse=True)
@@ -612,6 +632,14 @@ class TorrServerManager:
                 init_duration = default_file.get("duration_seconds", 2700 if file_size_mb > 600 else 1440)
             else:
                 init_duration = max(3600, min(14400, int((file_size_mb / 28) * 60))) if file_size_mb > 500 else 5400
+
+            if duration and duration > 60:
+                init_duration = int(duration)
+            else:
+                probed = _probe_cache.get(f"{torrent_hash}_{default_index}", {})
+                probed_dur = probed.get("duration", 0)
+                if probed_dur and probed_dur > 60:
+                    init_duration = int(probed_dur)
 
             file_name = default_file.get("name", default_file.get("filename", "video.mp4")) if default_file else "video.mp4"
             direct_url = f"{TORRSERVER_URL}/stream/{urllib.parse.quote(file_name)}?link={torrent_hash}&index={default_index}&play"
